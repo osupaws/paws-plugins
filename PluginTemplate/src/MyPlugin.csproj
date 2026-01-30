@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!--
+      CUSTOMIZE: Your Plugin's Output Name (without extension).
+      This will be the name of the .pawsplugin file.
+    -->
+    <PawsPluginName>MyPlugin</PawsPluginName>
+
+    <!-- Output Directory for the packed plugin -->
+    <PawsPluginPackageDir>$(ProjectDir)..\dist\$(PawsPluginName)\</PawsPluginPackageDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      DEPENDENCY: Paws.Core.Abstractions
+      This gives you access to IFunctionalExplicitPlugin, IHostServices, etc.
+
+      Default Path: Assumes this template is in standard Paws repo structure.
+      ADJUST THIS PATH if you move the project elsewhere!
+    -->
+    <Reference Include="Paws.Core.Abstractions">
+      <HintPath>..\..\Paws.DotNet\Paws.Core.Abstractions\bin\Release\net8.0\Paws.Core.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Example packages (Uncomment if needed) -->
+    <!-- <PackageReference Include="Newtonsoft.Json" Version="13.0.3" /> -->
+  </ItemGroup>
+
+  <!--
+    AUTO-PACKAGING TARGET
+    Runs automatically after a Release build.
+    Zips your DLLs, Manifest, and UI folder into a .pawsplugin file.
+  -->
+  <Target Name="PackagePawsPlugin" AfterTargets="Build" Condition=" '$(Configuration)' == 'Release' ">
+    <Message Text="--- Packaging Paws Plugin for Release ---" Importance="high" />
+
+    <!-- 1. Clean Dist Folder -->
+    <RemoveDir Directories="$(PawsPluginPackageDir)" />
+    <MakeDir Directories="$(PawsPluginPackageDir)" />
+
+    <!-- 2. Copy Plugin DLL -->
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PawsPluginPackageDir)" />
+
+    <!-- 3. Copy Manifest (plugin.json) -->
+    <Copy SourceFiles="$(ProjectDir)plugin.json" DestinationFolder="$(PawsPluginPackageDir)" />
+
+    <!-- 4. Copy Icon (icon.svg) -->
+    <!-- Checks parent directory for icon as per recommended structure -->
+    <Copy SourceFiles="$(ProjectDir)..\icon.svg" DestinationFolder="$(PawsPluginPackageDir)" Condition="Exists('$(ProjectDir)..\icon.svg')" />
+
+    <!-- 5. Copy UI Files -->
+    <ItemGroup>
+      <UiFiles Include="$(ProjectDir)..\ui\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(UiFiles)" DestinationFolder="$(PawsPluginPackageDir)ui\%(RecursiveDir)" />
+
+    <!-- 6. Zip it! -->
+    <ZipDirectory
+        SourceDirectory="$(PawsPluginPackageDir)"
+        DestinationFile="$(ProjectDir)..\dist\$(PawsPluginName).pawsplugin"
+        Overwrite="true" />
+
+    <Message Text="SUCCESS: Plugin created at $(ProjectDir)..\dist\$(PawsPluginName).pawsplugin" Importance="high" />
+  </Target>
+
+</Project>
