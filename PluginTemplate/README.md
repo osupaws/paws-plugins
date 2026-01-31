@@ -1,30 +1,44 @@
-# Paws Plugin Template
+# Paws Plugin Template (Vue + Paws UI)
 
-This folder contains a "Ready-to-Use" template for creating Paws plugins.
+This template uses **Vue 3**, **Vite**, and **TypeScript** to create a rich plugin interface using the official **Paws UI** library.
 
-## How to use
+## Prerequisites
 
-1.  **Copy this folder** to a new location (e.g., `MyNewPlugin`).
-2.  **Rename files**:
-    - Rename `src/MyPlugin.csproj` to `src/YourPluginName.csproj`.
-    - Rename `src/MyPlugin.cs` to `src/YourPluginName.cs`.
-3.  **Update `plugin.json`**:
-    - Open `src/plugin.json` and change the `id`, `name`, and `entryPoint`.
-4.  **Update C# Code**:
-    - Open the `.cs` file and rename the class / namespace to match your plugin.
-    - Update the `Id` property to match your `plugin.json`.
-5.  **Build**:
-    - Open terminal in `src/` folder.
-    - Run `dotnet build -c Release`.
-    - **Result**: Your plugin will be automatically packaged into `dist/YourPluginName.pawsplugin`.
+- Node.js (v18+)
+- .NET 8 SDK
+
+## Setup & Build
+
+1.  **Install Frontend Dependencies**:
+
+    ```bash
+    cd ui
+    pnpm install
+    ```
+
+    _Note: By default, it links to local `../../DVRSRCS/paws-ui`. If that's missing, update `package.json` to point to the correct registry or path._
+
+2.  **Dev Mode (Hot Reload)**:
+    - This is tricky because plugins run in an iframe.
+    - For now, usually you build and reload the plugin in Paws.
+
+3.  **Build Plugin**:
+    - **Step 1: Frontend**:
+      ```bash
+      cd ui
+      pnpm build
+      ```
+      (This creates `../ui-dist` with compiled files)
+    - **Step 2: Package**:
+      ```bash
+      cd ../src
+      dotnet build -c Release
+      ```
+      (This takes `ui-dist`, `dll`, and `manifest` and zips them into `dist/MyVuePlugin.pawsplugin`)
 
 ## Structure
 
-- `src/`: Contains the C# backend code and project file.
-- `ui/`: Contains the frontend HTML/CSS/JS.
-- `icon.svg`: The plugin icon (referenced in `plugin.json`).
-
-## Dependencies
-
-You need to reference `Paws.Core.Abstractions.dll`.
-The valid path is pre-configured in `.csproj` but might need adjustment if you move this folder far away from the main Paws project.
+- `src/`: C# Backend (Standard)
+- `ui/`: Vue 3 Project
+- `ui-dist/`: **Generated** frontend assets (Do not edit)
+- `dist/`: Final `.pawsplugin` output

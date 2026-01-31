@@ -1,22 +1,13 @@
 {
-  "id": "com.example.myplugin",
-  "name": "My Plugin",
+  "id": "com.example.vueplugin",
+  "name": "My Vue Plugin",
   "version": "1.0.0",
   "author": "Your Name",
-  "description": "Describe what your plugin does.",
-
-  "//": "ENTRY POINTS",
-  "entryPoint": "MyPlugin.dll",
+  "description": "A Vue 3 powered plugin.",
+  "entryPoint": "MyVuePlugin.dll",
   "ui": {
     "entry": "ui/index.html"
   },
   "icon": "icon.svg",
-
-  "minAppVersion": "1.0.0",
-
-  "permissions": [
-      "// Add permissions if required (e.g. osu:read, osu:write)"
-  ],
-  "provides": [],
-  "consumes": []
+  "minAppVersion": "1.0.0"
 }

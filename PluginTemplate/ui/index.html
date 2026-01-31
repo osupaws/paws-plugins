@@ -1,46 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Plugin</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Paws API Helper -->
-    <script src="paws-api.js"></script>
-</head>
-<body>
-    <div class="container">
-        <h1>My Plugin</h1>
-        <p>This is a template plugin for Paws.</p>
-
-        <div class="card">
-            <button id="testBtn">Send Command to Backend</button>
-            <p id="output">...</p>
-        </div>
-    </div>
-
-    <!-- Main Logic -->
-    <script>
-        document.getElementById('testBtn').addEventListener('click', async () => {
-            const output = document.getElementById('output');
-            output.textContent = "Sending...";
-
-            try {
-                // Calls 'example_command' in MyPlugin.cs
-                const response = await Paws.sendCommand("example_command", "Hello from UI!");
-                output.textContent = "Backend replied: " + JSON.stringify(response);
-            } catch (err) {
-                output.textContent = "Error: " + err;
-            }
-        });
-
-        // Listen for Theme/Mode changes
-        Paws.onMessage((msg) => {
-            console.log("Environment Update:", msg);
-            if (msg.type === "mode-changed") {
-                // Handle stable/lazer switch
-            }
-        });
-    </script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vue Plugin</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>
