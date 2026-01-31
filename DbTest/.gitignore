@@ -1,0 +1,38 @@
+# .gitignore for the Paws DB Test Plugin
+
+# --- General ---
+# Ignore operating system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Visual Studio / Rider / IDE ---
+# Ignore solution and user-specific files
+*.suo
+*.user
+*.userprefs
+*.sln.docstates
+
+# Ignore the .vs directory (contains settings, and caches)
+.vs/
+
+# --- .NET Build Artifacts ---
+# Ignore build output folders
+[Bb]in/
+[Oo]bj/
+
+# --- NuGet ---
+# Ignore the NuGet packages folder (less common now but good practice)
+packages/
+*.nuget.props
+*.nuget.targets
+
+# --- Other Generated Files ---
+# Ignore test results and log files
+TestResults/
+*.log
+*.tlog
+
+# Ignore files from merge conflicts
+*.orig

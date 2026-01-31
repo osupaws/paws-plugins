@@ -1,0 +1,18 @@
+{
+  "id": "a1b2c3d4-e5f6-4a9b-8c7d-6e5f4a3b2c1d",
+  "name": "DB Test Plugin",
+  "version": "1.0.0",
+  "author": "Paws Team",
+  "description": "A simple plugin to test reading from the lazer database.",
+  "entryPoint": "DbTestPlugin.dll",
+  "ui": {
+    "entry": "index.html",
+    "path": "./ui"
+  },
+  "permissions": [
+      "osu:read"
+  ],
+  "provides": [
+      "test-api-v1"
+  ]
+}

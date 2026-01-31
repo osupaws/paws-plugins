@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>DB Test Plugin</title>
+
+		<!-- These links provide the theme. They will be updated by paws-frontend-api.js -->
+		<link rel="stylesheet" href="paws-app://paws-theme-base.css" />
+		<link id="paws-theme-base-link" rel="stylesheet" href="" />
+		<link id="paws-theme-custom-link" rel="stylesheet" href="" />
+
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<h1>Database Test</h1>
+		<p>Click the buttons to test the database for the currently selected client mode.</p>
+
+		<div class="button-group">
+			<button id="read-btn" class="paws-button primary">Test Read Access</button>
+			<button id="write-btn" class="paws-button secondary">Test Write Access</button>
+		</div>
+
+		<p class="warning">
+			<strong>Warning:</strong> For write tests, please ensure the respective osu! client is
+			completely closed!</p>
+
+		<div id="result">Waiting for mode...</div>
+
+		<script src="paws-app://paws-frontend-api.js"></script>
+		<script>
+			const resultDiv = document.getElementById("result");
+			let currentMode = "stable";
+
+			const urlParams = new URLSearchParams(window.location.search);
+			const pluginId = urlParams.get("pluginId");
+
+			window.paws.onNotice(notice => {
+				if (notice.type === "mode-changed") {
+					currentMode = notice.mode;
+					resultDiv.textContent = `Mode changed to: ${currentMode}. Ready to test.`;
+				}
+			});
+
+			async function executeTest(command) {
+				if (!pluginId) {
+					resultDiv.textContent = "Error: Could not determine plugin ID. Cannot send command.";
+					return;
+				}
+
+				resultDiv.textContent = `Asking backend to '${command}' for ${currentMode} mode...`;
+
+				try {
+					const endpoint = `/api/plugins/execute/${pluginId}`;
+					const body = {
+						commandName: command,
+						payload: { mode: currentMode }
+					};
+
+					resultDiv.textContent = await window.paws.post(endpoint, body);
+				} catch (error) {
+					resultDiv.textContent = `Error: ${error.message}`;
+				}
+			}
+
+			document.getElementById("read-btn").addEventListener("click", () => executeTest("test-read"));
+			document.getElementById("write-btn").addEventListener("click", () => executeTest("test-write"));
+		</script>
+	</body>
+</html>

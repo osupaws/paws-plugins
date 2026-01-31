@@ -1,0 +1,28 @@
+body {
+	padding: 20px;
+	text-align: center;
+	color: var(--paws-color-text-primary);
+	background-color: var(--paws-color-bg-darkest);
+}
+#result, #security-test-results {
+	margin-top: 20px;
+	padding: 15px;
+	background-color: var(--paws-color-bg-dark);
+	border-radius: 8px;
+	min-height: 40px;
+    text-align: left;
+}
+hr {
+    margin: 20px 0;
+    border-color: var(--paws-color-bg-dark);
+}
+.button-group {
+	display: flex;
+	justify-content: center;
+	gap: 15px;
+}
+.warning {
+	font-size: 0.9em;
+	color: var(--paws-color-warning);
+	margin-top: 20px;
+}

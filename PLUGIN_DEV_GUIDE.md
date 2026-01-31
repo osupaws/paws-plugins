@@ -22,7 +22,7 @@ All plugins must strictly adhere to the following stack to ensure visual consist
 
 - **Frontend**: Vue 3 + TypeScript
 - **Package Manager**: `pnpm`
-- **UI Library**: `@osupaws/paws-ui`
+- **UI Library**: `@osupaws/paws-ui` (via GitHub Packages)
 - **Backend**: .NET 8.0
 
 **Visual Consistency Policy**:
@@ -33,13 +33,16 @@ Plugins must use `paws-ui` components (e.g., `<PawsButton>`, `<PawsCard>`). Do n
 ## 3. Creating a Plugin
 
 1.  Copy the official `PluginTemplate` folder.
-2.  **Frontend Setup**:
+2.  **Dependencies Setup**:
+    - Ensure `Libs/Paws.Core.Abstractions.dll` exists in the repository root.
+    - Ensure `.npmrc` is configured in your UI folder to point `@osupaws` to `https://npm.pkg.github.com`.
+3.  **Frontend Setup**:
     ```bash
     cd ui
     pnpm install
     pnpm build  # Compiles Vue to static HTML/JS in '../ui-dist'
     ```
-3.  **Backend Package**:
+4.  **Backend Package**:
     ```bash
     cd ../src
     dotnet build -c Release # Packs 'ui-dist' and DLLs into a .pawsplugin
@@ -53,6 +56,8 @@ In your Vue components:
 import { PawsButton, PawsCard } from "@osupaws/paws-ui";
 // Global styles are imported in main.ts
 ```
+
+**Note**: Since `paws-ui` is hosted on GitHub Packages, you may need to authenticate or ensure your environment can access public GitHub packages.
 
 ---
 
