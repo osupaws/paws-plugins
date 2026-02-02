@@ -37,15 +37,32 @@ Plugins must use `paws-ui` components (e.g., `<PawsButton>`, `<PawsCard>`). Do n
     - Ensure `Libs/Paws.Core.Abstractions.dll` exists in the repository root.
     - Ensure `.npmrc` is configured in your UI folder to point `@osupaws` to `https://npm.pkg.github.com`.
 3.  **Frontend Setup**:
+    - **CRITICAL**: Your `index.html` MUST include the Paws theme links and API script.
+
+    ```html
+    <!-- Theme Links -->
+    <link rel="stylesheet" href="paws-app://paws-theme-base.css" />
+    <link id="paws-theme-base-link" rel="stylesheet" href="" />
+    <link id="paws-theme-custom-link" rel="stylesheet" href="" />
+    <!-- API Script -->
+    <script src="paws-app://paws-frontend-api.js"></script>
+    ```
+
+    - Build:
+      You can use the universal build script included in the template:
+
+    ```powershell
+    .\build.ps1
+    ```
+
+    Or build manually:
+
     ```bash
     cd ui
     pnpm install
-    pnpm build  # Compiles Vue to static HTML/JS in '../ui-dist'
-    ```
-4.  **Backend Package**:
-    ```bash
+    pnpm build
     cd ../src
-    dotnet build -c Release # Packs 'ui-dist' and DLLs into a .pawsplugin
+    dotnet build -c Release
     ```
 
 ### Using Paws UI
@@ -54,40 +71,18 @@ In your Vue components:
 
 ```typescript
 import { PawsButton, PawsCard } from "@osupaws/paws-ui";
-// Global styles are imported in main.ts
-```
-
-**Note**: Since `paws-ui` is hosted on GitHub Packages, you may need to authenticate or ensure your environment can access public GitHub packages.
-
----
-
-## 4. Development Reference
-
-### Backend (C#)
-
-Implement `IFunctionalExplicitPlugin`.
-Access `IHostServices` for:
-
-- `LogMessage(string)`
-- `GetLazerContext()`
-- `PerformStableWriteAsync(action)`
-
-### Frontend API
-
-Use the helper provided in the templates:
-
-```javascript
-// Send command to C# Backend
-await Paws.sendCommand("my_command", { some: "data" });
 ```
 
 ---
 
 ## 5. Manifest (`plugin.json`)
 
+> [!IMPORTANT]
+> The `id` in `plugin.json` MUST be a **GUID** and it MUST match exactly the `Id` property in your main C# class. **Do not use string IDs** like `com.example.plugin` yet.
+
 ```json
 {
-  "id": "com.example.myplugin",
+  "id": "11111111-1111-1111-1111-111111111111",
   "name": "My Plugin",
   "version": "1.0.0",
   "entryPoint": "MyPlugin.dll",

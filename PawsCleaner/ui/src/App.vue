@@ -1,76 +1,164 @@
 <script setup lang="ts">
 import { ref } from "vue";
-// Import generic API helper
-import { Paws } from "./paws-api";
+import {
+  PawsCard,
+  PawsCheckbox,
+  PawsHeading,
+  PawsDropdown,
+  PawsButton,
+  PawsProgressbar,
+} from "@osupaws/paws-ui";
 
-// Import components from Paws UI
-// Note: Ensure @osupaws/paws-ui is installed
-import { PawsButton, PawsCard } from "@osupaws/paws-ui";
+const rulesets = ref({
+  osu: true,
+  taiko: true,
+  catch: true,
+  mania: true,
+});
 
-const responseText = ref("Waiting for action...");
-const loading = ref(false);
+const assets = ref({
+  skins: false,
+  sounds: false,
+  videos: false,
+  storyboards: false,
+  previews: false,
+  background: "keep",
+});
 
-async function sendGreet() {
-  loading.value = true;
-  try {
-    const res = await Paws.sendCommand("greet", "Hello from Vue!");
-    responseText.value = JSON.stringify(res);
-  } catch (err) {
-    responseText.value = "Error: " + err;
-  } finally {
-    loading.value = false;
-  }
-}
+const backgroundOptions = ["keep", "delete", "compress"];
 </script>
 
 <template>
   <div class="plugin-container">
-    <h1>Vue 3 + Paws UI</h1>
-
-    <PawsCard title="Live Demo" class="demo-card">
-      <p class="mb-4">This button uses the Paws Design System:</p>
-
-      <div class="flex-row">
-        <PawsButton
-          @click="sendGreet"
-          :disabled="loading"
-          label="Send Command"
-        />
-      </div>
-
-      <div class="response-box">
-        {{ responseText }}
+    <PawsCard class="cleaner-card">
+      <template #heading>
+        <PawsHeading size="lg">ruleset</PawsHeading>
+      </template>
+      <div class="checkbox-group">
+        <PawsCheckbox label="osu" v-model="rulesets.osu" />
+        <PawsCheckbox label="mania" v-model="rulesets.mania" />
+        <PawsCheckbox label="fruits" v-model="rulesets.catch" />
+        <PawsCheckbox label="taiko" v-model="rulesets.taiko" />
       </div>
     </PawsCard>
+
+    <PawsCard class="cleaner-card">
+      <template #heading>
+        <PawsHeading size="lg">assets</PawsHeading>
+      </template>
+
+      <div class="assets-container">
+        <!-- Row 1: skins, sounds, background dropdown -->
+        <div class="checkbox-group">
+          <PawsCheckbox label="skins" v-model="assets.skins" />
+          <PawsCheckbox label="sounds" v-model="assets.sounds" />
+          <div style="width: 200px">
+            <PawsDropdown
+              label="bgs"
+              :options="backgroundOptions"
+              v-model="assets.background"
+              size="compact"
+              defaultValue="keep"
+            />
+          </div>
+        </div>
+
+        <!-- Row 2: videos, storyboards, previews -->
+        <div class="checkbox-group">
+          <PawsCheckbox label="videos" v-model="assets.videos" />
+          <PawsCheckbox label="storyboards" v-model="assets.storyboards" />
+          <PawsCheckbox label="previews" v-model="assets.previews" />
+        </div>
+      </div>
+    </PawsCard>
+
+    <div class="split-row">
+      <PawsCard class="cleaner-card-half">
+        <template #heading>
+          <PawsHeading size="lg">filters</PawsHeading>
+        </template>
+        <p>TBD</p>
+      </PawsCard>
+
+      <PawsCard class="cleaner-card-half">
+        <template #heading>
+          <PawsHeading size="lg">filter rules</PawsHeading>
+        </template>
+        <p>TBD</p>
+      </PawsCard>
+    </div>
+
+    <PawsButton label="clean it up!" class="action-button" variant="primary" />
+
+    <PawsProgressbar :progress="0" class="progress-bar" />
   </div>
 </template>
 
 <style scoped>
 .plugin-container {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 20px;
-  color: var(--paws-color-text-primary);
-}
-
-.demo-card {
-  margin-top: 20px;
-}
-
-.mb-4 {
-  margin-bottom: 1rem;
-}
-
-.flex-row {
+  box-sizing: border-box;
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  height: 100vh;
+  padding: 32px;
 }
 
-.response-box {
-  background: var(--paws-color-bg-tertiary);
-  padding: 10px;
-  border-radius: 4px;
-  font-family: monospace;
+/* Deep selector to override child component styles if needed */
+:deep([data-paws-part="content"]) {
+  margin-top: 12px !important;
+}
+
+.cleaner-card {
+  width: 100%;
+  box-sizing: border-box;
+  /* Let these shrink if space is tight, though usually they have intrinsic height */
+  flex-shrink: 0;
+}
+
+.checkbox-group {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 32px;
+  width: 100%;
+}
+
+.assets-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.split-row {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.cleaner-card-half {
+  flex: 1;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 292px;
+}
+
+.action-button {
+  width: 100%;
+  flex: 1; /* Take all remaining height */
+  /* Ensure it doesn't get too small if space is tight? */
+  min-height: 48px;
+  font-weight: var(--paws-font-weight-bold);
+  font-size: 32px;
+  border-radius: 16px;
+}
+
+.progress-bar {
+  width: 100%;
+  flex-shrink: 0; /* Keep valid height */
 }
 </style>

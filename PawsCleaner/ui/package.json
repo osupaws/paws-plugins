@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "@osupaws/paws-ui": "0.3.2-alpha"
+    "@osupaws/paws-ui": "0.3.7-alpha",
+    "vue": "^3.5.13"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
