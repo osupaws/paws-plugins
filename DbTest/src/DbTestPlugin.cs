@@ -20,7 +20,7 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
     public Guid Id => new("a1b2c3d4-e5f6-4a9b-8c7d-6e5f4a3b2c1d");
     public string Name => "DB Test";
     public string Description => "A plugin to test reading/writing to Lazer and Stable databases based on the selected mode.";
-    public string Version => "1.1.0";
+    public string Version => "0.0.1";
     public string Author => "Paws Team";
 
     // --- IFunctionalExplicitPlugin Properties ---
@@ -74,10 +74,16 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
         }
         else // Stable Mode
         {
-            var osuDb = await _hostServices.GetStableOsuDbAsync() as OsuDatabase;
-            if (osuDb == null) return "Error: Could not parse osu!.db. Is the stable path set correctly?";
-
-            return $"Stable Mode: Found {osuDb.Beatmaps.Count} beatmap difficulties.";
+            var stable = _hostServices.GetStableContext();
+            string result = "Checking Wrappers...";
+            
+            await _hostServices.PerformStableWriteAsync(root => {
+                 var dbPath = Path.Combine(root, "osu!.db");
+                 var db = stable.ReadOsuDatabase(dbPath);
+                 result = $"Stable Mode (Wrapper): Found {db.Beatmaps.Count()} beatmap difficulties using GetStableContext().";
+            });
+            
+            return result;
         }
     }
 
@@ -117,25 +123,19 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
                 string resultMessage = "Stable Mode Write: Test completed.";
                 await _hostServices.PerformStableWriteAsync(stablePath =>
                 {
+                    // Test Wrapper Writing
+                    var stable = _hostServices.GetStableContext();
                     var dbPath = Path.Combine(stablePath, "osu!.db");
-                    if (!File.Exists(dbPath))
-                    {
-                        resultMessage = "Error: osu!.db not found in the stable directory.";
-                        return;
-                    }
+                    var db = stable.ReadOsuDatabase(dbPath);
+                    
+                    var tempPath = Path.Combine(Path.GetTempPath(), "paws_stable_wrapper_test.db");
+                    
+                    // Use Wrapper to save
+                    stable.WriteOsuDatabase(db, tempPath);
+                    
+                    if (File.Exists(tempPath)) File.Delete(tempPath);
 
-                    var db = DatabaseDecoder.DecodeOsu(dbPath);
-                    var tempPath = Path.Combine(Path.GetTempPath(), "paws_stable_write_test.db");
-
-                    // The "write" is saving to a temporary file, not overwriting the original.
-                    db.Save(tempPath);
-
-                    if (File.Exists(tempPath))
-                    {
-                        File.Delete(tempPath); // Clean up the temp file
-                    }
-
-                    resultMessage = "Stable Mode: Success! Performed a safe test write.";
+                    resultMessage = "Stable Mode (Wrapper): Success! Read and Write via Wrapper works.";
                 });
                 return resultMessage;
             }
