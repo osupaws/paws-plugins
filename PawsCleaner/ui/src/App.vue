@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { Paws } from "./paws-api";
 import {
   PawsCard,
   PawsCheckbox,
@@ -25,7 +26,47 @@ const assets = ref({
   background: "keep",
 });
 
+const dryRun = ref(true);
+const isLoading = ref(false);
+const progress = ref(0);
+
 const backgroundOptions = ["keep", "delete", "compress"];
+
+async function startCleaning() {
+  if (isLoading.value) return;
+  isLoading.value = true;
+  progress.value = 0;
+
+  const payload = {
+    // Mode is now handled by Backend using IsLegacyMode check
+    DryRun: dryRun.value,
+    Rulesets: {
+      Osu: rulesets.value.osu,
+      Taiko: rulesets.value.taiko,
+      Catch: rulesets.value.catch,
+      Mania: rulesets.value.mania,
+    },
+    Assets: {
+      Skins: assets.value.skins,
+      Sounds: assets.value.sounds,
+      Videos: assets.value.videos,
+      Storyboards: assets.value.storyboards,
+      Previews: assets.value.previews,
+      Background: assets.value.background,
+    },
+  };
+
+  try {
+    const result = await Paws.sendCommand("clean", payload);
+    console.log("Cleanup Result:", result);
+    // Simulate progress for now as we don't have real-time events hooked up yet in backend fully
+    progress.value = 100;
+  } catch (e) {
+    console.error("Cleanup Error:", e);
+  } finally {
+    isLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -75,9 +116,16 @@ const backgroundOptions = ["keep", "delete", "compress"];
     <div class="split-row">
       <PawsCard class="cleaner-card-half">
         <template #heading>
-          <PawsHeading size="lg">filters</PawsHeading>
+          <PawsHeading size="lg">options</PawsHeading>
         </template>
-        <p>TBD</p>
+        <div
+          style="padding: 16px; display: flex; flex-direction: column; gap: 8px"
+        >
+          <PawsCheckbox label="Dry Run (Simulate)" v-model="dryRun" />
+          <p style="font-size: 12px; opacity: 0.7">
+            Check console (Ctrl+Shift-I) for logs.
+          </p>
+        </div>
       </PawsCard>
 
       <PawsCard class="cleaner-card-half">
@@ -88,9 +136,15 @@ const backgroundOptions = ["keep", "delete", "compress"];
       </PawsCard>
     </div>
 
-    <PawsButton label="clean it up!" class="action-button" variant="primary" />
+    <PawsButton
+      :label="dryRun ? 'simulate cleanup' : 'clean it up!'"
+      class="action-button"
+      variant="primary"
+      @click="startCleaning"
+      :disabled="isLoading"
+    />
 
-    <PawsProgressbar :progress="0" class="progress-bar" />
+    <PawsProgressbar :progress="progress" class="progress-bar" />
   </div>
 </template>
 

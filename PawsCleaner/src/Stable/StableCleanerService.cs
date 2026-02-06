@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Paws.Core.Abstractions;
 using Realms;
+using Realms.Schema;
 
 namespace PawsCleaner.Stable
 {
@@ -24,8 +25,14 @@ namespace PawsCleaner.Stable
 
         public async Task<object> CleanAsync(CleanerOptions options)
         {
+            // Stats
             int deletedMaps = 0;
             int deletedFiles = 0;
+            // Detailed Stats (Deletion)
+            int delOsu = 0, delTaiko = 0, delCatch = 0, delMania = 0, delOther = 0;
+            // Detailed Stats (Source DB)
+            int srcOsu = 0, srcTaiko = 0, srcCatch = 0, srcMania = 0, srcOther = 0;
+
             long freedBytes = 0;
 
             await _host.PerformStableWriteAsync(stablePath =>
@@ -34,80 +41,166 @@ namespace PawsCleaner.Stable
                 var dbPath = Path.Combine(stablePath, "osu!.db");
                 var songDir = Path.Combine(stablePath, "Songs");
 
+                _host.LogMessage($"[CONFIG] Mode: {options.Mode}, DryRun: {options.DryRun}", PawsLogLvl.Information, "StableCleaner");
+                _host.LogMessage($"[CONFIG] Delete Rulesets? Osu: {options.Rulesets?.Osu ?? false}, Taiko: {options.Rulesets?.Taiko ?? false}, Catch: {options.Rulesets?.Catch ?? false}, Mania: {options.Rulesets?.Mania ?? false}", PawsLogLvl.Information, "StableCleaner");
                 _host.LogMessage("Reading osu!.db...", PawsLogLvl.Information, "StableCleaner");
+
                 var db = stable.ReadOsuDatabase(dbPath);
 
                 // --- 1. Ruleset Cleaning ---
-                var mapsToRemove = new List<dynamic>(); // DbBeatmap
-                var dbBeatmaps = db.Beatmaps.ToList(); // Materialize
+                var mapsToRemove = new List<dynamic>(); 
+                var dbBeatmaps = db.Beatmaps.ToList();
+                _host.LogMessage($"[ANALYSIS] Found {dbBeatmaps.Count} total beatmaps in osu!.db.", PawsLogLvl.Information, "StableCleaner");
 
                 foreach (var map in dbBeatmaps)
                 {
-                    // Map Ruleset enum: 0=Std, 1=Taiko, 2=Catch, 3=Mania
-                    // Warning: OsuParsers might use different Enum values/types.
-                    // Assuming standard cast works or wrapper handles it.
-                    // Ruleset is int or Enum. Convert to string for easy switch.
-                    int rId = (int)map.Ruleset;
+                    int rId = (int)map.Ruleset; // Cast assuming Enum or Int
+
+                    // Source Stats
+                    switch (rId)
+                    {
+                        case 0: srcOsu++; break;
+                        case 1: srcTaiko++; break;
+                        case 2: srcCatch++; break;
+                        case 3: srcMania++; break;
+                        default: srcOther++; break;
+                    }
+
                     bool keep = true;
 
                     switch (rId)
                     {
-                        case 0: keep = options.Rulesets?.Osu ?? true; break;
-                        case 1: keep = options.Rulesets?.Taiko ?? true; break;
-                        case 2: keep = options.Rulesets?.Catch ?? true; break;
-                        case 3: keep = options.Rulesets?.Mania ?? true; break;
+                        // Logic: Option=True (Checked) means DELETE. So Keep = False.
+                        case 0: keep = !(options.Rulesets?.Osu ?? false); break;
+                        case 1: keep = !(options.Rulesets?.Taiko ?? false); break;
+                        case 2: keep = !(options.Rulesets?.Catch ?? false); break;
+                        case 3: keep = !(options.Rulesets?.Mania ?? false); break;
+                        default: keep = true; break;
                     }
 
                     if (!keep)
                     {
-                        mapsToRemove.Add(map);
-                        deletedMaps++;
-                        
-                        // Delete .osu file
-                        try
+                         // Deletion Stats
+                         switch (rId)
+                         {
+                            case 0: delOsu++; break;
+                            case 1: delTaiko++; break;
+                            case 2: delCatch++; break;
+                            case 3: delMania++; break;
+                            default: delOther++; break;
+                         }
+
+                        if (options.DryRun)
                         {
-                            var osuPath = Path.Combine(songDir, map.FolderName, map.FileName);
-                            if (File.Exists(osuPath))
-                            {
-                                var fi = new FileInfo(osuPath);
-                                freedBytes += fi.Length;
-                                File.Delete(osuPath);
-                            }
+                             // dry run - just count, maybe log detailed if needed but usually summary is enough
+                             deletedMaps++;
+                             mapsToRemove.Add(map); // Add to list for count, but don't delete
                         }
-                        catch { /* Ignore IO errors */ }
+                        else
+                        {
+                            mapsToRemove.Add(map);
+                            deletedMaps++;
+                            
+                            try
+                            {
+                                var osuPath = Path.Combine(songDir, map.FolderName, map.FileName);
+                                if (File.Exists(osuPath))
+                                {
+                                    var fi = new FileInfo(osuPath);
+                                    freedBytes += fi.Length;
+                                    File.Delete(osuPath);
+                                }
+                            }
+                            catch { /* Ignore IO errors */ }
+                        }
                     }
                 }
 
-                if (mapsToRemove.Count > 0)
+                if (!options.DryRun && mapsToRemove.Count > 0)
                 {
                     _host.LogMessage($"Removing {mapsToRemove.Count} maps from DB...", PawsLogLvl.Information, "StableCleaner");
-                    // Use the wrapper method as per documentation
                     foreach (var m in mapsToRemove) db.RemoveBeatmap(m); 
                     stable.WriteOsuDatabase(db, dbPath);
                 }
+                else if (options.DryRun)
+                {
+                    // Log summary
+                     string stats = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
+                     string srcStats = $"Osu: {srcOsu}, Taiko: {srcTaiko}, Catch: {srcCatch}, Mania: {srcMania}, Other: {srcOther}";
+                     
+                     _host.LogMessage($"[ANALYSIS] Source Distribution: {srcStats}", PawsLogLvl.Information, "StableCleaner");
+                     _host.LogMessage($"[DRY RUN SUMMARY] Found {mapsToRemove.Count} maps to delete.", PawsLogLvl.Information, "StableCleaner");
+                     _host.LogMessage($"[DRY RUN STATS] Breakdown: {stats}", PawsLogLvl.Information, "StableCleaner");
+                }
 
-                // --- 2. Asset Cleaning (Stateful) ---
-                // We open our local Realm
-                var realmConfig = new RealmConfiguration(_indexDbPath) { SchemaVersion = 1 };
-                using var realm = Realm.GetInstance(realmConfig);
 
-                // Sync Logic: Check which maps need indexing
-                // We assume db.Beatmaps is now UPDATED (removed maps are gone).
-                // But wait, WriteOsuDatabase was called. We should use the current list.
-                // Actually `db.Beatmaps` is a reference to the list in memory.
+                // --- 2. Asset Cleaning (Start Indexing) ---
+                var realmConfig = new RealmConfiguration(_indexDbPath) { SchemaVersion = 3 };
+
+                // Explicitly define schema to bypass auto-discovery issues in plugins
+                try
+                {
+                    var schemaBuilder = new RealmSchema.Builder();
+                    schemaBuilder.Add(typeof(IndexedBeatmap));
+                    schemaBuilder.Add(typeof(IndexedFile));
+                    realmConfig.Schema = schemaBuilder.Build();
+                }
+                catch (Exception ex) 
+                {
+                    _host.LogMessage($"[Error] Failed to build Realm schema: {ex.Message}", PawsLogLvl.Error, "StableCleaner");
+                }
+
+                Realm realm;
+                try 
+                {
+                    realm = Realm.GetInstance(realmConfig);
+                }
+                catch (Exception ex)
+                {
+                    _host.LogMessage($"[DEBUG] First Realm Attempt Failed: {ex.Message}. Deleting DB...", PawsLogLvl.Warning, "StableCleaner");
+                    // If migration needed or other schema error, delete and retry
+                    try { File.Delete(_indexDbPath); } catch {}
+                    try { Directory.Delete(Path.Combine(_indexDbPath, "management"), true); } catch {} // Cleanup aux folders if any
+                    
+                    realm = Realm.GetInstance(realmConfig);
+                }
+                // Ensure disposal
+                using (realm)
+                {
                 
+                _host.LogMessage($"[DEBUG] Realm Opened! Schema Count: {realm.Schema.Count}", PawsLogLvl.Information, "StableCleaner");
+
                 var validHashes = new HashSet<string>();
                 var mapsToIndex = new List<dynamic>();
+
+                _host.LogMessage("Verifying index integrity...", PawsLogLvl.Information, "StableCleaner");
 
                 foreach (var map in db.Beatmaps)
                 {
                     string hash = map.MD5Hash;
                     validHashes.Add(hash);
-                    
-                    if (realm.Find<IndexedBeatmap>(hash) == null)
+
+                    var indexed = realm.Find<IndexedBeatmap>(hash);
+                    bool needsIndex = false;
+
+                    if (indexed == null)
                     {
-                        mapsToIndex.Add(map);
+                        needsIndex = true;
                     }
+                    else
+                    {
+                        // Check if folder modified since last index
+                        var mapFolder = Path.Combine(songDir, map.FolderName);
+                        if (Directory.Exists(mapFolder))
+                        {
+                            var lastWrite = Directory.GetLastWriteTimeUtc(mapFolder);
+                            // If folder is newer than our index (+ buffer), re-index
+                            if (lastWrite > indexed.LastIndexedTime.AddSeconds(5)) 
+                                needsIndex = true;
+                        }
+                    }
+
+                    if (needsIndex) mapsToIndex.Add(map);
                 }
                 
                 // Cleanup Realm (Remove old maps)
@@ -123,112 +216,155 @@ namespace PawsCleaner.Stable
                     }
                 });
 
-                // Indexing New Maps
+                // Indexing New/Modified Maps
                 if (mapsToIndex.Count > 0)
                 {
-                    _host.LogMessage($"Indexing {mapsToIndex.Count} new maps...", PawsLogLvl.Information, "StableCleaner");
-                    int i = 0;
-                    foreach (var map in mapsToIndex)
-                    {
-                        string folderPath = Path.Combine(songDir, map.FolderName);
-                        if (!Directory.Exists(folderPath)) continue;
-
-                        try 
-                        {
-                            // 1. Get Used Assets (via Host Helper)
-                            var usedAssets = stable.GetUsedAssets(folderPath); // HashSet<string>
-
-                            // 2. Scan Directory
-                            var allFiles = Directory.GetFiles(folderPath);
-
-                            realm.Write(() =>
-                            {
-                                var indexedMap = new IndexedBeatmap 
-                                { 
-                                    Hash = map.MD5Hash, 
-                                    FolderPath = map.FolderName 
-                                };
-
-                                foreach (var filePath in allFiles)
-                                {
-                                    string fileName = Path.GetFileName(filePath);
-                                    string ext = Path.GetExtension(fileName).ToLowerInvariant();
-                                    bool isUsed = usedAssets.Contains(fileName.ToLowerInvariant());
-
-                                    // Special Case: .osu files are always "Used" (implicitly)
-                                    // But Cleaner might have deleted them? No, we filter based on current DB.
-                                    if (ext == ".osu") isUsed = true;
-                                    if (ext == ".osb") isUsed = true; // Storyboards are used by definition in structure, cleaner logic decides if we keep them.
-
-                                    indexedMap.Files.Add(new IndexedFile 
-                                    {
-                                        Filename = fileName,
-                                        Extension = ext,
-                                        IsUsed = isUsed
-                                    });
-                                }
-                                realm.Add(indexedMap);
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            _host.LogMessage($"Failed to index {map.FolderName}: {ex.Message}", PawsLogLvl.Warning, "StableCleaner");
-                        }
-                        
-                        i++;
-                        if (i % 50 == 0) _host.LogMessage($"Indexed {i}/{mapsToIndex.Count}...", PawsLogLvl.Information, "StableCleaner");
-                    }
+                    _host.LogMessage($"Indexing {mapsToIndex.Count} maps...", PawsLogLvl.Information, "StableCleaner");
+                    IndexMaps(realm, stable, mapsToIndex, songDir); // Pass stable context
                 }
 
                 // Execute Asset Cleaning
-                if (options.Assets != null)
+                ExecuteAssetCleaning(realm, options, songDir, ref deletedFiles, ref freedBytes);
+                } // End using realm
+            });
+
+            string stats = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
+            string srcStats = $"Osu: {srcOsu}, Taiko: {srcTaiko}, Catch: {srcCatch}, Mania: {srcMania}, Other: {srcOther}";
+
+            string msg = options.DryRun 
+                ? $"[DRY RUN] Found {deletedMaps} maps ({stats}) to delete. (Source: {srcStats})"
+                : $"Cleanup Complete. Deleted {deletedMaps} maps ({stats}), {deletedFiles} files. (Source: {srcStats})";
+
+            return new 
+            { 
+                Success = true, 
+                Message = msg + (options.DryRun ? "" : $" Freed {freedBytes / 1024 / 1024} MB.") 
+            };
+        }
+
+        private void ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, ref int deletedFiles, ref long freedBytes)
+        {
+            var assets = options.Assets;
+            if (assets == null) return;
+
+            try
+            {
+                var allIndexed = realm.All<IndexedBeatmap>().ToList();
+                int itemsProcessed = 0;
+
+                // Log Asset Options
+                _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BG={assets.Background}, Nuke={assets.Skins == true && assets.Sounds == true && assets.Videos == true && assets.Storyboards == true}", PawsLogLvl.Information, "StableCleaner");
+
+                if (options.DryRun)
                 {
-                    _host.LogMessage("Cleaning Assets...", PawsLogLvl.Information, "StableCleaner");
-                    
-                    var allMaps = realm.All<IndexedBeatmap>().ToList();
-                    foreach (var map in allMaps)
+                     _host.LogMessage("--- DRY RUN STARTED ---", PawsLogLvl.Warning, "StableCleaner");
+                }
+
+                foreach (var map in allIndexed)
+                {
+                    var mapFolder = Path.Combine(songDir, map.FolderPath);
+                    if (!Directory.Exists(mapFolder)) continue;
+
+                    bool nukeMode = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
+                    bool deleteBg = assets.Background?.ToLower() == "delete";
+
+                    foreach (var file in map.Files)
                     {
-                        var fullFolder = Path.Combine(songDir, map.FolderPath);
-                        if (!Directory.Exists(fullFolder)) continue;
+                        bool shouldDelete = false;
+                        string debugReason = "";
 
-                        foreach (var file in map.Files)
+                        if (nukeMode)
                         {
-                            bool shouldDelete = false;
+                            // Keep Scripts, Backgrounds (unless delete requested), Audios
+                            bool isScript = (file.UsageType & 16) != 0;
+                            bool isBg = (file.UsageType & 1) != 0;
+                            bool isAudio = (file.UsageType & 2) != 0;
+                            
+                            // Essential files checks
+                            // Script and Audio are always essential. BG is essential unless deleteBg is true.
+                            bool isEssential = isScript || isAudio || (isBg && !deleteBg);
 
-                            // 1. Orphan/Skin Cleaning
-                            if (options.Assets.Skins && !file.IsUsed)
+                            if (!isEssential) 
                             {
                                 shouldDelete = true;
+                                debugReason = "Nuke Mode: Asset";
+                            }
+                            else if (options.DryRun)
+                            {
+                                // Log why we kept it
+                                string reason = "";
+                                if (isScript) reason += "Script ";
+                                if (isBg) reason += deleteBg ? "BG (Deletable) " : "BG (Kept) ";
+                                if (isAudio) reason += "Audio ";
+                                // Logic check: if isEssential is true, we are here.
+                                // If isBg && deleteBg -> isEssential is FALSE. So we are NOT here. We are in 'if (!isEssential)'.
+                                // So here isBg implies !deleteBg.
+                                _host.LogMessage($"[DryRun] KEEP: {file.Filename} ({reason.Trim()})", PawsLogLvl.Information, "StableCleaner");
+                            }
+                        }
+                        else
+                        {
+                            // Granular Logic
+                            bool isVideo = (file.UsageType & 4) != 0;
+                            bool isSb = (file.UsageType & 8) != 0;
+                            bool isAudio = (file.UsageType & 2) != 0; // Hitsounds might be here if custom
+                            
+                            // Storyboards
+                            if (assets.Storyboards && isSb)
+                            {
+                                shouldDelete = true;
+                                debugReason = "Storyboard";
                             }
 
-                            // 2. Video Cleaning
-                            if (options.Assets.Videos)
+                            // Videos
+                            if (assets.Videos && isVideo)
                             {
-                                if (file.Extension == ".avi" || file.Extension == ".flv" || file.Extension == ".mp4" || file.Extension == ".mkv")
-                                    shouldDelete = true;
+                                shouldDelete = true;
+                                debugReason = "Video";
                             }
 
-                            // 3. Storyboard Cleaning
-                            if (options.Assets.Storyboards)
+                            // Skins (Images)
+                            // Delete if it is skinnable AND not a background/SB (unless SB is also checked)
+                            // Note: Usagetype 1=BG. 
+                            if (assets.Skins && file.IsSkinnable && (file.UsageType & 1) == 0 && (file.Extension == ".png" || file.Extension == ".jpg"))
                             {
-                                if (file.Extension == ".osb") shouldDelete = true;
-                                // TODO: Delete sprites that are ONLY used in storyboard? 
-                                // Current model just says "IsUsed". We don't distinguish "UsedByOSB" vs "UsedByBG".
-                                // For V1, we only delete .osb files. Detailed sprite cleaning requires deeper analysis.
+                                // Safety: Don't delete if it's used as BG (already checked bitmask 1)
+                                // If it is used as SB (bitmask 8), only delete if Storyboards are ALSO checked? 
+                                // Or does "Clean Skins" imply removing skinnable elements even if used in SB?
+                                // Usually SB elements are skinnable. 
+                                // Let's simplify: If it's a skin element, and not a BG, delete it.
+                                shouldDelete = true;
+                                debugReason = "Skin Element";
                             }
 
-                            if (shouldDelete)
+                            // Sounds (Skin sounds / Hitsounds)
+                            if (assets.Sounds && file.IsSkinnable && (file.Extension == ".wav" || file.Extension == ".mp3" || file.Extension == ".ogg"))
                             {
-                                var fullPath = Path.Combine(fullFolder, file.Filename);
-                                if (File.Exists(fullPath))
+                                // Don't delete if it's the MAIN audio (Usage 2)
+                                if ((file.UsageType & 2) == 0)
                                 {
-                                    try 
+                                    shouldDelete = true;
+                                    debugReason = "Sound Element";
+                                }
+                            }
+                        }
+
+                        if (shouldDelete)
+                        {
+                            var fullPath = Path.Combine(mapFolder, file.Filename);
+                            if (File.Exists(fullPath))
+                            {
+                                if (options.DryRun)
+                                {
+                                    _host.LogMessage($"[DryRun] Would delete: {file.Filename} ({debugReason}) in {map.FolderPath}", PawsLogLvl.Information, "StableCleaner");
+                                }
+                                else
+                                {
+                                    try
                                     {
                                         var fi = new FileInfo(fullPath);
                                         freedBytes += fi.Length;
                                         File.Delete(fullPath);
-                                        // Update Index? Technically we should remove from Realm, but next sync will handle it.
-                                        // Or we can verify existence next time.
                                         deletedFiles++;
                                     }
                                     catch {}
@@ -236,14 +372,144 @@ namespace PawsCleaner.Stable
                             }
                         }
                     }
+                    itemsProcessed++;
                 }
-            });
+                
+                if (options.DryRun)
+                {
+                     _host.LogMessage("--- DRY RUN FINISHED ---", PawsLogLvl.Warning, "StableCleaner");
+                }
+            }
+            catch (Exception ex)
+            {
+                 _host.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, "StableCleaner");
+            }
+        }
 
-            return new 
-            { 
-                Success = true, 
-                Message = $"Stable Cleanup Complete. Deleted {deletedMaps} maps, {deletedFiles} files. Freed {freedBytes / 1024 / 1024} MB." 
-            };
+        private void IndexMaps(Realm realm, StableContext stable, List<dynamic> maps, string songDir)
+        {
+            int i = 0;
+            foreach (var map in maps)
+            {
+                string folderPath = Path.Combine(songDir, map.FolderName);
+                if (!Directory.Exists(folderPath)) continue;
+
+                var allFiles = Directory.GetFiles(folderPath);
+                var assetsUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); 
+
+                // scan all .osu and .osb files
+                foreach (var file in allFiles)
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    string fname = Path.GetFileName(file);
+                    
+                    if (ext == ".osu")
+                    {
+                        try
+                        {
+                            MarkUsage(assetsUsage, fname, 16); // Script
+
+                            // Use Core Wrapper
+                            var beatmap = stable.ParseBeatmap(file);
+                            
+                            // 1. Audio
+                            if (!string.IsNullOrEmpty(beatmap.AudioFilename))
+                            {
+                                MarkUsage(assetsUsage, beatmap.AudioFilename, 2); 
+                                // _host.LogMessage($"[Index] Marked Audio: {beatmap.AudioFilename} for {fname}", PawsLogLvl.Information, "StableCleaner");
+                            }
+
+                            // 2. Background / Video
+                            if (!string.IsNullOrEmpty(beatmap.BackgroundImage))
+                                MarkUsage(assetsUsage, beatmap.BackgroundImage, 1); 
+
+                            if (!string.IsNullOrEmpty(beatmap.Video))
+                                MarkUsage(assetsUsage, beatmap.Video, 4); 
+
+                            // 3. Storyboard (embedded)
+                            if (beatmap.EventsStoryboard != null)
+                            {
+                                foreach (var sbFile in beatmap.EventsStoryboard.GetAllReferencedFiles())
+                                {
+                                     MarkUsage(assetsUsage, sbFile, 8);
+                                }
+                            }
+                            
+                            // 4. Hitsounds (Optional, but if we wanted to track them explicitly as "Audio")
+                            foreach (var sample in beatmap.GetHitSoundSamples())
+                            {
+                                MarkUsage(assetsUsage, sample, 2); // Treat custom samples as Audio (essential)
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _host.LogMessage($"[Index] Failed to parse {fname}: {ex.Message}", PawsLogLvl.Error, "StableCleaner");
+                        }
+                    }
+                    else if (ext == ".osb")
+                    {
+                        try
+                        {
+                            MarkUsage(assetsUsage, fname, 16); // Script
+                            
+                            // Use Core Wrapper
+                            var sb = stable.ParseStoryboard(file);
+                            foreach (var sbFile in sb.GetAllReferencedFiles())
+                            {
+                                MarkUsage(assetsUsage, sbFile, 8);
+                            }
+                        }
+                        catch {}
+                    }
+                }
+
+                realm.Write(() =>
+                {
+                    var existing = realm.Find<IndexedBeatmap>(map.MD5Hash);
+                    if (existing != null) realm.Remove(existing);
+
+                    var indexedMap = new IndexedBeatmap 
+                    { 
+                        Hash = map.MD5Hash, 
+                        FolderPath = map.FolderName,
+                        LastIndexedTime = DateTimeOffset.UtcNow
+                    };
+
+                    foreach (var filePath in allFiles)
+                    {
+                        string fileName = Path.GetFileName(filePath);
+                        string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                        
+                        int usage = 0;
+                        if (assetsUsage.TryGetValue(fileName, out var u)) usage = u;
+
+                        bool isSkinnable = StableKnownFiles.IsSkinnable(fileName);
+
+                        indexedMap.Files.Add(new IndexedFile 
+                        {
+                            Filename = fileName,
+                            Extension = ext,
+                            UsageType = usage,
+                            IsSkinnable = isSkinnable
+                        });
+                    }
+                    realm.Add(indexedMap);
+                });
+                
+                i++;
+                if (i % 50 == 0) _host.LogMessage($"Indexed {i}/{maps.Count}...", PawsLogLvl.Information, "StableCleaner");
+            }
+        }
+
+        private void MarkUsage(Dictionary<string, int> dict, string filename, int mask)
+        {
+            string cleanName = filename.Replace("\"", "").Trim(); // Cleanup quotes
+            if (string.IsNullOrEmpty(cleanName)) return;
+            
+            if (dict.ContainsKey(cleanName))
+                dict[cleanName] |= mask;
+            else
+                dict[cleanName] = mask;
         }
     }
 }

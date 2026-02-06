@@ -14,7 +14,7 @@
       <HintPath>..\..\Libs\Paws.Core.Abstractions.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <PackageReference Include="OsuParsers" Version="1.7.2" PrivateAssets="all" />
+
     <PackageReference Include="Realm" Version="20.1.0" PrivateAssets="all" />
   </ItemGroup>
 
