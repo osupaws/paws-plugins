@@ -46,4 +46,12 @@
     <Message Text="SUCCESS: Plugin created at $(ProjectDir)..\dist\$(PawsPluginName).pawsplugin" Importance="high" />
   </Target>
 
+  <ItemGroup>
+    <None Update="Resources\white.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\white.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

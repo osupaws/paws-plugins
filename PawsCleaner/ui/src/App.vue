@@ -22,7 +22,6 @@ const assets = ref({
   sounds: false,
   videos: false,
   storyboards: false,
-  previews: false,
   background: "keep",
 });
 
@@ -30,7 +29,33 @@ const dryRun = ref(true);
 const isLoading = ref(false);
 const progress = ref(0);
 
-const backgroundOptions = ["keep", "delete", "compress"];
+const backgroundOptions = ["keep", "white", "custom"];
+const customBgPng = ref<string | null>(null);
+const customBgJpg = ref<string | null>(null);
+const customBgPngName = ref<string | null>(null);
+const customBgJpgName = ref<string | null>(null);
+
+function handleFileSelect(event: Event, type: "png" | "jpg") {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    const base64 = e.target?.result as string;
+    // Strip prefix like "data:image/png;base64," if needed
+    // But sending full data URI is safer for backend to parse MIME if needed
+    // We'll send full string.
+    if (type === "png") {
+      customBgPng.value = base64;
+      customBgPngName.value = file.name;
+    } else {
+      customBgJpg.value = base64;
+      customBgJpgName.value = file.name;
+    }
+  };
+  reader.readAsDataURL(file);
+}
 
 async function startCleaning() {
   if (isLoading.value) return;
@@ -51,8 +76,9 @@ async function startCleaning() {
       Sounds: assets.value.sounds,
       Videos: assets.value.videos,
       Storyboards: assets.value.storyboards,
-      Previews: assets.value.previews,
-      Background: assets.value.background,
+      BackgroundMode: assets.value.background, // "keep", "white", "custom"
+      CustomBackgroundPng: customBgPng.value,
+      CustomBackgroundJpg: customBgJpg.value,
     },
   };
 
@@ -104,11 +130,39 @@ async function startCleaning() {
           </div>
         </div>
 
+        <!-- Custom Background Files -->
+        <div
+          v-if="assets.background === 'custom'"
+          class="custom-files-container"
+        >
+          <div class="file-row">
+            <span class="file-label">PNG:</span>
+            <input
+              type="file"
+              accept=".png"
+              @change="(e) => handleFileSelect(e, 'png')"
+            />
+            <span v-if="customBgPngName" class="file-name">{{
+              customBgPngName
+            }}</span>
+          </div>
+          <div class="file-row">
+            <span class="file-label">JPG:</span>
+            <input
+              type="file"
+              accept=".jpg,.jpeg"
+              @change="(e) => handleFileSelect(e, 'jpg')"
+            />
+            <span v-if="customBgJpgName" class="file-name">{{
+              customBgJpgName
+            }}</span>
+          </div>
+        </div>
+
         <!-- Row 2: videos, storyboards, previews -->
         <div class="checkbox-group">
           <PawsCheckbox label="videos" v-model="assets.videos" />
           <PawsCheckbox label="storyboards" v-model="assets.storyboards" />
-          <PawsCheckbox label="previews" v-model="assets.previews" />
         </div>
       </div>
     </PawsCard>
@@ -214,5 +268,37 @@ async function startCleaning() {
 .progress-bar {
   width: 100%;
   flex-shrink: 0; /* Keep valid height */
+}
+
+.custom-files-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-label {
+  font-weight: bold;
+  width: 40px;
+}
+
+.file-name {
+  font-size: 0.8em;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
 }
 </style>
