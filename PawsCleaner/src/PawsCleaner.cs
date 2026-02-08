@@ -253,20 +253,20 @@ namespace PawsCleaner
                         }
                     }
 
-                    // MAIN CLEANING LOOP (BGs + Assets)
+                    // --- MAIN CLEANING LOOP ---
                     if (!options.DryRun)
                     {
                         int updatedSets = 0;
-                        _host.LogMessage("[DEBUG] Starting Asset Cleaning Loop...", PawsLogLvl.Information, Name);
+                        _host.LogMessage("Starting Asset Cleaning...", PawsLogLvl.Information, Name);
 
                         foreach (var set in beatmapSets)
                         {
                             if (setsToDelete.Contains(set.ID)) continue;
 
                             bool setModified = false;
-                            var filesToRemove = new List<dynamic>(); // Declared at set scope
+                            var filesToRemove = new List<dynamic>();
 
-                            // 1. Identify Protected Files (BGs and Audios of valid maps)
+                            // 1. Identify Protected Files (Backgrounds and Audio)
                             var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             var bgFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -274,79 +274,71 @@ namespace PawsCleaner
                             {
                                 try
                                 {
-                                    string audio = map.Metadata?.AudioFile;
+                                    string? audio = map.Metadata?.AudioFile;
                                     if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
                                 }
                                 catch { }
 
-                                string bg = map.Metadata?.BackgroundFile;
+                                string? bg = map.Metadata?.BackgroundFile;
                                 if (!string.IsNullOrEmpty(bg))
                                 {
                                     bgFiles.Add(bg);
-                                    // BGs are protected unless we are replacing them
+                                    // Protect BG unless we are in "Replace Mode" (and replacement is ready)
                                     if (!bgImported) protectedFiles.Add(bg);
                                 }
                             }
 
                             if (set.Files != null)
                             {
-                                // Note: We iterate a copy or index-based? No, standard foreach on List is fine 
-                                // if we don't modify collection. We modify via filesToRemove later.
                                 foreach (var fileUsage in set.Files)
                                 {
-                                    string fname = fileUsage.Filename;
+                                    string? fname = fileUsage.Filename;
+                                    if (string.IsNullOrEmpty(fname)) continue; // Safety
+
                                     string ext = Path.GetExtension(fname).ToLowerInvariant();
 
-                                    // CRITICAL: Protect .osu files (Difficulties) from asset cleaning!
+                                    // CRITICAL: Always protect .osu files (Map Difficulties)
                                     if (ext == ".osu") continue;
 
                                     bool isBg = bgFiles.Contains(fname);
                                     bool isProtected = protectedFiles.Contains(fname);
 
-                                    // BG Replacement
+                                    // --- Logic: Background Replacement ---
                                     if (isBg && bgImported)
                                     {
-                                        dynamic? targetReplacement = null;
-                                        if (ext == ".png")
-                                            targetReplacement = importedPng ?? importedJpg;
-                                        else
-                                            targetReplacement = importedJpg ?? importedPng;
+                                        dynamic? targetReplacement = (ext == ".png") ? (importedPng ?? importedJpg) : (importedJpg ?? importedPng);
 
-                                        if (targetReplacement != null && fileUsage.File?.Hash != targetReplacement.Hash)
+                                        if (targetReplacement != null && fileUsage.File?.Hash != targetReplacement?.Hash)
                                         {
                                             fileUsage.File = targetReplacement;
                                             setModified = true;
                                             _host.LogMessage($"[BG Replace] {fname}", PawsLogLvl.Information, Name);
                                         }
-                                        continue; // Done with BG
+                                        continue;
                                     }
 
-                                    // Asset Cleaning
+                                    // --- Logic: Asset Stripping ---
                                     if (isProtected) continue;
-                                    // Note: If isBg=true but bgImported=false, it's added to protectedFiles above.
 
                                     bool shouldUnlink = false;
-                                    string reason = "";
 
-                                    // Video
+                                    // 1. Videos
                                     if (assets?.Videos == true)
                                     {
                                         if (ext == ".avi" || ext == ".mp4" || ext == ".mkv" || ext == ".flv" || ext == ".m4v")
                                         {
                                             shouldUnlink = true;
-                                            reason = "Video";
                                         }
                                     }
 
-                                    // Storyboard (OsuParsers via Core)
+                                    // 2. Storyboards (Precise & Heuristic)
                                     if (assets?.Storyboards == true)
                                     {
                                         if (ext == ".osb")
                                         {
                                             shouldUnlink = true;
-                                            reason = "Storyboard Script";
 
-                                            // Trigger advanced parsing to find dependent assets
+                                            // Advanced: Use Core API to find assets referenced by this SB
                                             try
                                             {
                                                 if (fileUsage.File?.Hash != null)
@@ -354,25 +346,22 @@ namespace PawsCleaner
                                                     List<string> sbAssets = ((dynamic)context).GetStoryboardAssetPaths(fileUsage.File.Hash);
                                                     if (sbAssets != null && sbAssets.Count > 0)
                                                     {
-                                                        // We found assets used by this SB. We must find them in the set and mark them too.
-                                                        // Note: We can't modify 'set.Files' while iterating. 
-                                                        // But we can add them to 'filesToRemove' if we can find the matching FileUsage object.
-                                                        // Iterate set.Files again to find matches? Yes.
-
-                                                        // Helper to find usages matching paths
-                                                        var assetUsages = set.Files.Where(u => sbAssets.Contains(u.Filename, StringComparer.OrdinalIgnoreCase)).ToList();
+                                                        var assetUsages = set.Files.Where(u => sbAssets.Contains((string?)u.Filename, StringComparer.OrdinalIgnoreCase)).ToList();
 
                                                         foreach (var assetUsage in assetUsages)
                                                         {
-                                                            // Check protection (BG/Audio) before adding
-                                                            string aName = assetUsage.Filename;
+                                                            string? aName = assetUsage.Filename;
+                                                            if (string.IsNullOrEmpty(aName)) continue;
+
+                                                            // Verify protection again just in case
                                                             if (!bgFiles.Contains(aName) && !protectedFiles.Contains(aName))
                                                             {
                                                                 if (!filesToRemove.Contains(assetUsage))
                                                                 {
                                                                     filesToRemove.Add(assetUsage);
-                                                                    _host.LogMessage($"[Delete Mark] {aName} (SB Asset from Parser)", PawsLogLvl.Information, Name);
                                                                     setModified = true;
+                                                                    // Log at lower frequency or detail if needed
+                                                                    // _host.LogMessage($"[SB Asset] {aName}", PawsLogLvl.Information, Name);
                                                                 }
                                                             }
                                                         }
@@ -381,47 +370,41 @@ namespace PawsCleaner
                                             }
                                             catch (Exception ex)
                                             {
-                                                _host.LogMessage($"[Parser Warn] Failed to parse SB {fname}: {ex.Message}", PawsLogLvl.Warning, Name);
+                                                _host.LogMessage($"[SB Parse Warn] {fname}: {ex.Message}", PawsLogLvl.Warning, Name);
                                             }
                                         }
-                                        // Still keep the folder heuristic as backup?
+                                        // Backup Heuristic: 'sb/' folder
                                         else if (fname.StartsWith("sb/", StringComparison.OrdinalIgnoreCase) || fname.StartsWith("sb\\", StringComparison.OrdinalIgnoreCase))
                                         {
                                             shouldUnlink = true;
-                                            reason = "Storyboard Asset (sb/ folder)";
                                         }
                                     }
 
-                                    // Skins (Strict Check using Known Files list)
+                                    // 3. Skins
                                     if (assets?.Skins == true)
                                     {
                                         if (StableKnownFiles.IsSkinnable(fname) && !isBg)
                                         {
                                             shouldUnlink = true;
-                                            reason = "Skin (Strict)";
                                         }
                                     }
 
-                                    // NUCLEAR MODE (Catch-All)
-                                    // If User selected ALL potentially removable assets (Videos + SB + Skins),
-                                    // treat this as "Delete Everything Non-Protected".
-                                    // This catches edge cases like 'sb/slider.png' that might not be strictly caught above.
+                                    // 4. Nuclear Mode (Catch-All)
+                                    // If strict cleaning is requested (Videos + SB + Skins), remove any non-protected asset.
                                     if (assets?.Videos == true && assets?.Storyboards == true && assets?.Skins == true)
                                     {
                                         if (!shouldUnlink && !isProtected && !isBg)
                                         {
                                             shouldUnlink = true;
-                                            reason = "Nuclear Clean (Unidentified Asset)";
                                         }
                                     }
 
-                                    // Sounds (Audio not Main)
+                                    // 5. Audio (Non-Primary)
                                     if (assets?.Sounds == true)
                                     {
                                         if ((ext == ".wav" || ext == ".mp3" || ext == ".ogg") && !isProtected)
                                         {
                                             shouldUnlink = true;
-                                            reason = "Sound";
                                         }
                                     }
 
@@ -429,16 +412,15 @@ namespace PawsCleaner
                                     {
                                         filesToRemove.Add(fileUsage);
                                         setModified = true;
-                                        _host.LogMessage($"[Delete Mark] {fname} ({reason})", PawsLogLvl.Information, Name);
+                                        // _host.LogMessage($"[Strip] {fname}", PawsLogLvl.Information, Name);
                                     }
                                 }
 
-                                // Apply Removals from List (Critical for Core Fix to work)
+                                // Apply Removals
                                 foreach (var f in filesToRemove)
                                 {
                                     set.Files.Remove(f);
                                 }
-
                             }
 
                             if (setModified)
@@ -450,43 +432,41 @@ namespace PawsCleaner
                                 }
                                 catch (Exception ex)
                                 {
-                                    _host.LogMessage($"[Update ERROR] Set {set.ID}: {ex.Message}", PawsLogLvl.Error, Name);
+                                    _host.LogMessage($"[Set Update Error] {set.ID}: {ex.Message}", PawsLogLvl.Error, Name);
                                 }
                             }
                         }
-                        _host.LogMessage($"[DEBUG] Cleanup Loop Finished. Updated {updatedSets} sets.", PawsLogLvl.Information, Name);
+                        _host.LogMessage($"Asset cleaning finished. Modified {updatedSets} beatmap sets.", PawsLogLvl.Information, Name);
 
-                        // --- V4 SAFE ORPHAN CLEANUP ---
-                        // Identify safe-to-delete orphans using Core logic (protects Skins, Scores, etc.)
+                        // --- ORPHAN DATABASE CLEANUP (Core V4 API) ---
+                        // Delegates safety checks (Skins/Scores/etc.) to the Core.
                         try
                         {
-                            _host.LogMessage("[ORPHAN CHECK] Requesting safe orphan list from Core...", PawsLogLvl.Information, Name);
+                            _host.LogMessage("Scanning for orphaned files...", PawsLogLvl.Information, Name);
 
-                            // Call Core API V4 (Dynamic)
-                            // GetSafeOrphanHashes() returns list of hashes NOT used by Beatmaps, Skins, Scores, etc.
                             List<string> safeOrphans = ((dynamic)context).GetSafeOrphanHashes();
 
                             if (safeOrphans.Count > 0)
                             {
                                 if (options.DryRun)
                                 {
-                                    _host.LogMessage($"[DRY RUN] Would delete {safeOrphans.Count} orphaned files (SAFE list) from Database.", PawsLogLvl.Information, Name);
+                                    _host.LogMessage($"[DRY RUN] Would purge {safeOrphans.Count} orphaned files from database.", PawsLogLvl.Information, Name);
                                 }
                                 else
                                 {
-                                    _host.LogMessage($"Deleting {safeOrphans.Count} orphaned files (SAFE list) from Database...", PawsLogLvl.Information, Name);
+                                    _host.LogMessage($"Purging {safeOrphans.Count} orphaned files...", PawsLogLvl.Information, Name);
                                     ((dynamic)context).DeleteFiles(safeOrphans);
-                                    _host.LogMessage("Orphan cleanup complete.", PawsLogLvl.Information, Name);
+                                    _host.LogMessage("Orphan purge complete.", PawsLogLvl.Information, Name);
                                 }
                             }
                             else
                             {
-                                _host.LogMessage("No orphaned files found (SAFE check).", PawsLogLvl.Information, Name);
+                                _host.LogMessage("No orphans found.", PawsLogLvl.Information, Name);
                             }
                         }
                         catch (Exception ex)
                         {
-                            _host.LogMessage($"[ORPHAN ERROR] Failed to clean orphans: {ex.Message}", PawsLogLvl.Error, Name);
+                            _host.LogMessage($"[Orphan Cleanup Error] {ex.Message}", PawsLogLvl.Error, Name);
                         }
                     }
 

@@ -163,18 +163,17 @@ namespace PawsCleaner.Stable
                 }
                 catch (Exception ex)
                 {
-                    _host.LogMessage($"[DEBUG] First Realm Attempt Failed: {ex.Message}. Deleting DB...", PawsLogLvl.Warning, "StableCleaner");
+                    _host.LogMessage($"Realm Open Failed: {ex.Message}. Recreating Index...", PawsLogLvl.Warning, "StableCleaner");
                     // If migration needed or other schema error, delete and retry
                     try { File.Delete(_indexDbPath); } catch { }
-                    try { Directory.Delete(Path.Combine(_indexDbPath, "management"), true); } catch { } // Cleanup aux folders if any
+                    try { Directory.Delete(Path.Combine(_indexDbPath, "management"), true); } catch { } // Cleanup aux folders
 
                     realm = Realm.GetInstance(realmConfig);
                 }
-                // Ensure disposal
+
                 using (realm)
                 {
-
-                    _host.LogMessage($"[DEBUG] Realm Opened! Schema Count: {realm.Schema.Count}", PawsLogLvl.Information, "StableCleaner");
+                    _host.LogMessage($"Realm Opened! Schema Count: {realm.Schema.Count}", PawsLogLvl.Information, "StableCleaner");
 
                     var validHashes = new HashSet<string>();
                     var mapsToIndex = new List<dynamic>();
@@ -226,7 +225,7 @@ namespace PawsCleaner.Stable
                     if (mapsToIndex.Count > 0)
                     {
                         _host.LogMessage($"Indexing {mapsToIndex.Count} maps...", PawsLogLvl.Information, "StableCleaner");
-                        IndexMaps(realm, stable, mapsToIndex, songDir); // Pass stable context
+                        IndexMaps(realm, stable, mapsToIndex, songDir);
                     }
 
                     // Execute Asset Cleaning
@@ -255,7 +254,7 @@ namespace PawsCleaner.Stable
 
             // Generate source files once for session in persistent plugin data
             string pluginDataDir = Path.GetDirectoryName(_indexDbPath) ?? string.Empty;
-            if (string.IsNullOrEmpty(pluginDataDir)) pluginDataDir = Path.GetTempPath(); // Fallback if GetDirectoryName fails
+            if (string.IsNullOrEmpty(pluginDataDir)) pluginDataDir = Path.GetTempPath();
 
             string srcJpg = Path.Combine(pluginDataDir, "paws_stable_src.jpg");
             string srcPng = Path.Combine(pluginDataDir, "paws_stable_src.png");
@@ -274,7 +273,6 @@ namespace PawsCleaner.Stable
                     {
                         // Internal White Logic
                         string whiteJpgB64 = "/9j/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/aAAgBAQAAAAB/P//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8Af//Z";
-                        // A simplistic white PNG base64 (1x1 pixel)
                         string whitePngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 
                         File.WriteAllBytes(srcJpg, Convert.FromBase64String(whiteJpgB64));
@@ -311,7 +309,8 @@ namespace PawsCleaner.Stable
                 int itemsProcessed = 0;
 
                 // Log Asset Options
-                _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={assets.Skins == true && assets.Sounds == true && assets.Videos == true && assets.Storyboards == true}", PawsLogLvl.Information, "StableCleaner");
+                bool isNuke = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
+                _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, "StableCleaner");
 
                 if (options.DryRun)
                 {
@@ -323,39 +322,40 @@ namespace PawsCleaner.Stable
                     var mapFolder = Path.Combine(songDir, map.FolderPath);
                     if (!Directory.Exists(mapFolder)) continue;
 
-                    bool nukeMode = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
 
                     foreach (var file in map.Files)
                     {
                         bool shouldDelete = false;
-                        string debugReason = "";
                         bool isReplacement = false;
                         string replacementSource = "";
 
-                        // Background Logic
+                        // Bitmask Usage: 1=BG, 2=Audio, 4=Video, 8=SB, 16=Script
                         bool isBg = (file.UsageType & 1) != 0;
+                        bool isScript = (file.UsageType & 16) != 0;
+                        bool isAudio = (file.UsageType & 2) != 0;
+                        bool isVideo = (file.UsageType & 4) != 0;
+                        bool isSb = (file.UsageType & 8) != 0;
 
+                        // --- Background Replacement Logic ---
                         if (isBg && (bgMode == "white" || bgMode == "custom") && srcCreated)
                         {
                             string targetExt = file.Extension.ToLower();
                             replacementSource = (targetExt == ".png") ? srcPng : srcJpg;
-                            // Only replace if source exists (e.g. if custom mode didn't provide PNG but map has PNG, maybe skip or use JPG?)
-                            if (!File.Exists(replacementSource)) replacementSource = srcJpg; // Fallback to JPG source if PNG not provided
+                            // Only replace if source exists
+                            if (!File.Exists(replacementSource)) replacementSource = srcJpg;
 
                             if (File.Exists(replacementSource))
                             {
                                 shouldDelete = true;
                                 isReplacement = true;
-                                debugReason = "Background Replacement";
                             }
                         }
 
-                        if (nukeMode)
+                        // --- Nuke Mode vs Granular Logic ---
+                        if (isNuke)
                         {
-                            // Nuke Logic
-                            bool isScript = (file.UsageType & 16) != 0;
-                            bool isAudio = (file.UsageType & 2) != 0;
-
+                            // Catch-All: Delete everything except Protected (Speed/Audio/Script)
+                            // Note: Background is protected ONLY if 'keep' mode. If replaces, it's handled above.
                             if (isBg)
                             {
                                 if (bgMode == "keep")
@@ -372,39 +372,31 @@ namespace PawsCleaner.Stable
                             else
                             {
                                 shouldDelete = true;
-                                debugReason = "Nuke Mode";
                             }
                         }
                         else if (!isBg) // Normal Mode (Non-BG items)
                         {
                             // Granular Logic
-                            bool isVideo = (file.UsageType & 4) != 0;
-                            bool isSb = (file.UsageType & 8) != 0;
-
                             if (assets.Storyboards && isSb)
                             {
                                 shouldDelete = true;
-                                debugReason = "Storyboard";
                             }
 
                             if (assets.Videos && isVideo)
                             {
                                 shouldDelete = true;
-                                debugReason = "Video";
                             }
 
                             if (assets.Skins && file.IsSkinnable && (file.Extension == ".png" || file.Extension == ".jpg"))
                             {
                                 shouldDelete = true;
-                                debugReason = "Skin Element";
                             }
 
                             if (assets.Sounds && file.IsSkinnable && (file.Extension == ".wav" || file.Extension == ".mp3" || file.Extension == ".ogg"))
                             {
-                                if ((file.UsageType & 2) == 0) // Not Main Audio
+                                if (!isAudio) // Not Main Audio
                                 {
                                     shouldDelete = true;
-                                    debugReason = "Sound Element";
                                 }
                             }
                         }
@@ -416,7 +408,8 @@ namespace PawsCleaner.Stable
                             {
                                 if (options.DryRun)
                                 {
-                                    string action = isReplacement ? $"[DryRun] Would REPLACE: {file.Filename}" : $"[DryRun] Would delete: {file.Filename} ({debugReason})";
+                                    // Log sparse detail for dry run?
+                                    // string action = isReplacement ? $"[DryRun] Would REPLACE: {file.Filename}" : $"[DryRun] Would delete: {file.Filename}";
                                     // _host.LogMessage($"{action} in {map.FolderPath}", PawsLogLvl.Information, "StableCleaner"); 
                                 }
                                 else
@@ -457,21 +450,6 @@ namespace PawsCleaner.Stable
             {
                 _host.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, "StableCleaner");
             }
-            finally
-            {
-                // Note: We deliberately DO NOT delete src files here if symlinks point to them.
-                // Symlinks need the target to exist.
-                // If we placed them in Temp, the OS eventually cleans them, or we can keep them managed by plugin.
-                // However, user said "cache while paws is open".
-                // If this method runs per clean request, and we delete them at end, symlinks break immediately?
-                // Actually, if we symlink to a temp file and delete it, the link is broken.
-                // User said: "replacement... done once... then for stable link to it". 
-                // This implies the source file must PERSIST.
-                // Moving source file generation to constructor or persistent location might be better, 
-                // but since we are modifying files, let's leave them for now.
-                // Wait, if I delete srcJpg at finally block, all symlinks break.
-                // So I MUST NOT delete them here.
-            }
         }
 
         private void IndexMaps(Realm realm, StableContext stable, List<dynamic> maps, string songDir)
@@ -485,7 +463,10 @@ namespace PawsCleaner.Stable
                 var allFiles = Directory.GetFiles(folderPath);
                 var assetsUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-                // scan all .osu and .osb files
+                // Helper to mark usage
+                void Mark(string f, int m) => MarkUsage(assetsUsage, f, m);
+
+                // Scan .osu and .osb files using Core Wrapper
                 foreach (var file in allFiles)
                 {
                     var ext = Path.GetExtension(file).ToLowerInvariant();
@@ -495,38 +476,30 @@ namespace PawsCleaner.Stable
                     {
                         try
                         {
-                            MarkUsage(assetsUsage, fname, 16); // Script
+                            Mark(fname, 16); // Script (16)
 
-                            // Use Core Wrapper
                             var beatmap = stable.ParseBeatmap(file);
 
-                            // 1. Audio
-                            if (!string.IsNullOrEmpty(beatmap.AudioFilename))
-                            {
-                                MarkUsage(assetsUsage, beatmap.AudioFilename, 2);
-                                // _host.LogMessage($"[Index] Marked Audio: {beatmap.AudioFilename} for {fname}", PawsLogLvl.Information, "StableCleaner");
-                            }
+                            // 1. Audio (2)
+                            if (!string.IsNullOrEmpty(beatmap.AudioFilename)) Mark(beatmap.AudioFilename, 2);
 
-                            // 2. Background / Video
-                            if (!string.IsNullOrEmpty(beatmap.BackgroundImage))
-                                MarkUsage(assetsUsage, beatmap.BackgroundImage, 1);
+                            // 2. Background (1) / Video (4)
+                            if (!string.IsNullOrEmpty(beatmap.BackgroundImage)) Mark(beatmap.BackgroundImage, 1);
+                            if (!string.IsNullOrEmpty(beatmap.Video)) Mark(beatmap.Video, 4);
 
-                            if (!string.IsNullOrEmpty(beatmap.Video))
-                                MarkUsage(assetsUsage, beatmap.Video, 4);
-
-                            // 3. Storyboard (embedded)
+                            // 3. Storyboard (8)
                             if (beatmap.EventsStoryboard != null)
                             {
                                 foreach (var sbFile in beatmap.EventsStoryboard.GetAllReferencedFiles())
                                 {
-                                    MarkUsage(assetsUsage, sbFile, 8);
+                                    Mark(sbFile, 8);
                                 }
                             }
 
-                            // 4. Hitsounds (Optional, but if we wanted to track them explicitly as "Audio")
+                            // 4. Hitsounds (Optional, treated as Audio/Sound)
                             foreach (var sample in beatmap.GetHitSoundSamples())
                             {
-                                MarkUsage(assetsUsage, sample, 2); // Treat custom samples as Audio (essential)
+                                Mark(sample, 2); // Treat as audio
                             }
                         }
                         catch (Exception ex)
@@ -538,13 +511,12 @@ namespace PawsCleaner.Stable
                     {
                         try
                         {
-                            MarkUsage(assetsUsage, fname, 16); // Script
+                            Mark(fname, 16); // Script
 
-                            // Use Core Wrapper
                             var sb = stable.ParseStoryboard(file);
                             foreach (var sbFile in sb.GetAllReferencedFiles())
                             {
-                                MarkUsage(assetsUsage, sbFile, 8);
+                                Mark(sbFile, 8);
                             }
                         }
                         catch { }
@@ -591,11 +563,11 @@ namespace PawsCleaner.Stable
 
         private void MarkUsage(Dictionary<string, int> dict, string filename, int mask)
         {
-            string cleanName = filename.Replace("\"", "").Trim(); // Cleanup quotes
+            string cleanName = filename.Replace("\"", "").Trim();
             if (string.IsNullOrEmpty(cleanName)) return;
 
-            if (dict.ContainsKey(cleanName))
-                dict[cleanName] |= mask;
+            if (dict.TryGetValue(cleanName, out int currentMask))
+                dict[cleanName] = currentMask | mask;
             else
                 dict[cleanName] = mask;
         }

@@ -1,7 +1,7 @@
 {
   "id": "d34db33f-c001-4c33-9999-c1ea4e700001",
   "name": "Paws Cleaner",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "author": "Paws Team",
   "description": "A powerful system cleaner for osu!",
   "entryPoint": "PawsCleaner.dll",
