@@ -1,18 +1,14 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // REVIEW NEEDED IN FUTURE TO DIFFER "-{n}" AND "{n}" AND REMOVE INCORRECTLY NAMED FILES
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-namespace PawsCleaner;
+namespace PawsCleaner.Common;
 
 /// <summary>
 /// Lists of standard osu! filenames.
 /// Used to identify valid skin elements versus garbage.
 /// </summary>
-public static class StableKnownFiles
+public static class KnownFiles
 {
     /// <summary>
     /// Checks for valid skinnable elements.
@@ -21,38 +17,38 @@ public static class StableKnownFiles
     public static bool IsSkinnable(string filename)
     {
         var ext = Path.GetExtension(filename).ToLowerInvariant();
-        
+
         // Strict check for images
         if (ext == ".png" || ext == ".jpg" || ext == ".jpeg")
         {
             if (SkinnableImages.Contains(filename)) return true;
-            
+
             // Animation check (strips digits/hyphens)
             var nameNoExt = Path.GetFileNameWithoutExtension(filename);
             var baseName = nameNoExt.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
-            
+
             if (baseName.EndsWith("-")) baseName = baseName.Substring(0, baseName.Length - 1);
-            
+
             return SkinnableAnimationBases.Contains(baseName);
         }
-        
+
         // Basename check for sounds
         if (ext == ".wav" || ext == ".mp3" || ext == ".ogg")
         {
             var name = Path.GetFileNameWithoutExtension(filename);
-            
+
             if (SkinnableSoundNames.Contains(name)) return true;
-            
+
             // Special case for comboburst-{n}
             if (name.StartsWith("comboburst-", StringComparison.OrdinalIgnoreCase))
             {
                 var suffix = name.Substring(11);
                 if (int.TryParse(suffix, out _)) return true;
             }
-            
+
             return false;
         }
-        
+
         return false;
     }
 

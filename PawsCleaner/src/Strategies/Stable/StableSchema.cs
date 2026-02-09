@@ -1,8 +1,6 @@
 using Realms;
-using System;
-using System.Collections.Generic;
 
-namespace PawsCleaner.Stable
+namespace PawsCleaner.Strategies.Stable
 {
     public partial class IndexedBeatmap : IRealmObject
     {
@@ -10,9 +8,9 @@ namespace PawsCleaner.Stable
         public string Hash { get; set; } = ""; // MD5 from osu!.db
 
         public string FolderPath { get; set; } = "";
-        
+
         public DateTimeOffset LastIndexedTime { get; set; } // For detecting folder changes (re-download check)
-        
+
         public IList<IndexedFile> Files { get; } = null!;
     }
 
@@ -32,6 +30,6 @@ namespace PawsCleaner.Stable
         // "Skin" is not a UsageType because the map script doesn't say "Use cursor.png".
         // Instead, the GAME engine checks for "cursor.png" automatically.
         // So distinct property: IsSkinnable (true if filename matches standard skin list)
-        public bool IsSkinnable { get; set; } 
+        public bool IsSkinnable { get; set; }
     }
 }
