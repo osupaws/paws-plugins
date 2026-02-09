@@ -73,7 +73,8 @@ Shared metadata for a beatmap (or set).
 Represents a physical file on disk (deduplicated).
 
 - `Hash` (string, PrimaryKey): SHA-2 hash of the file content.
-- **Storage Location**: `files/{first_character}/{second_character}/{Hash}`.
+- **Storage Location**: `files/{first_character}/{first_and_second_character}/{Hash}`.
+  > Example: `files/a/ab/abc123...`
 
 #### `RealmNamedFileUsage`
 

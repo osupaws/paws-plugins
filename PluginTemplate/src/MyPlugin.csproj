@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
-    <PawsPluginName>MyVuePlugin</PawsPluginName>
+    <PawsPluginName>MyPlugin</PawsPluginName>
     <PawsPluginPackageDir>$(ProjectDir)..\dist\$(PawsPluginName)\</PawsPluginPackageDir>
   </PropertyGroup>
 
