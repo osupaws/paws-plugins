@@ -14,6 +14,7 @@ namespace PawsCleaner.Strategies.Stable
         public DateTimeOffset LastCleanTime { get; set; } // When the cleanup was last performed
 
         public int AppliedFeaturesMask { get; set; } // Bitmask of CleanerFeatures (matching Lazer bitmask)
+        public string OptionsHash { get; set; } = ""; // Hash of cleaner options (for BG replacement detection)
 
         public int ContentMask { get; set; } // Bitmask of what the map ACTUALLY HAS (Videos, SB, etc.)
 

@@ -5,6 +5,8 @@ using PawsCleaner.Common;
 using PawsCleaner.Models;
 using Realms;
 using System.Text;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Paws.Core.Abstractions.Interfaces.Services;
 
 namespace PawsCleaner.Strategies.Stable.Components
@@ -13,6 +15,15 @@ namespace PawsCleaner.Strategies.Stable.Components
     {
         private readonly IHost _host;
         private readonly string _name;
+
+        // Duplicate method from Lazer Schema or move to Common
+        public static string ComputeOptionsHash(CleanerOptions options)
+        {
+            var json = JsonSerializer.Serialize(options, new JsonSerializerOptions { WriteIndented = false });
+            using var sha256 = SHA256.Create();
+            var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
+            return Convert.ToBase64String(bytes);
+        }
 
         public StableAssetCleaner(IHost host, string strategyName)
         {
@@ -78,6 +89,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                 int itemsProcessed = 0;
 
                 bool isNuke = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
+                string currentOptionsHash = ComputeOptionsHash(options);
                 _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, _name);
 
                 int currentFeaturesMask = 0;
@@ -105,16 +117,11 @@ namespace PawsCleaner.Strategies.Stable.Components
                     // We exclude BG (256) from the check requirement, but include it in the applied mask later
                     if ((currentFeaturesMask & ~map.AppliedFeaturesMask) == 0 && map.LastCleanTime > map.LastIndexedTime)
                     {
-                        // Optimization 2: Check if BG needs update?
-                        // If BG mode is not keep, we should probably run unless we track BG hash.
-                        // For now, if BG is requested, we might skip the optimization check or just check if BG was applied?
-                        // User requested masking BG out. Let's assume if user runs cleaner, they might want BG update.
-                        // But if BG is "keep", we can skip safely.
-                        if (bgMode == "keep")
+                        // Optimization 2: Check Background options
+                        if (bgMode == "keep" || map.OptionsHash == currentOptionsHash)
                         {
                             continue;
                         }
-                        // If BG is active, we might want to run.
                     }
 
                     // Optimization 3: Check ContentMask. If map has NONE of the requested features, skip.
@@ -132,6 +139,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                                 {
                                     map.LastCleanTime = DateTimeOffset.UtcNow;
                                     map.AppliedFeaturesMask |= currentFeaturesMask;
+                                    map.OptionsHash = currentOptionsHash;
                                 });
                             }
                             continue;
@@ -238,6 +246,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                             map.LastCleanTime = DateTimeOffset.UtcNow;
                             map.AppliedFeaturesMask |= currentFeaturesMask;
                             if (bgMode != "keep") map.AppliedFeaturesMask |= 256;
+                            map.OptionsHash = currentOptionsHash;
                         });
                     }
                     itemsProcessed++;

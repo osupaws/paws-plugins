@@ -142,7 +142,7 @@ namespace PawsCleaner.Strategies.Stable
 
 
                 // --- 2. Asset Cleaning ---
-                var realmConfig = new RealmConfiguration(_indexDbPath) { SchemaVersion = 3 };
+                var realmConfig = new RealmConfiguration(_indexDbPath) { SchemaVersion = 4 };
 
                 try
                 {

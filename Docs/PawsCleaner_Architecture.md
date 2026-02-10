@@ -42,11 +42,17 @@ Each cached entry (`CachedLazerSet` or `IndexedBeatmap`) stores an `AppliedFeatu
 - `32`: Taiko Ruleset
 - `64`: Catch Ruleset
 - `128`: Mania Ruleset
-- `256`: Backgrounds (Special handling)
+- `256`: Backgrounds (Legacy/Applied indicator)
 
 **Optimization Logic:**
 When a cleaning run starts, we compute the `CurrentFeaturesMask` based on user options.
-If `(CurrentFeaturesMask & ~Cached.AppliedFeaturesMask) == 0`, it means **all requested features have already been processed**. We can skip the map entirely (unless Background replacement options changed).
+If `(CurrentFeaturesMask & ~Cached.AppliedFeaturesMask) == 0`, it means **all requested features have already been processed**.
+
+### OptionsHash (Lazer & Stable)
+
+To safely handle scenarios where options change (e.g., switching from `BackgroundMode="white"` to `BackgroundMode="custom"`), we also store an `OptionsHash`.
+
+If Background Replacement is requested, we check `Cached.OptionsHash == CurrentOptionsHash`. If they differ, we assume the user wants to re-apply the background logic, even if the "Backgrounds" bit (256) is set.
 
 ### ContentMask (Stable Specific)
 

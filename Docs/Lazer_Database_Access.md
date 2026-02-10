@@ -11,7 +11,7 @@ Do **NOT** attempt to open the game's `client.realm` file directly. This will ca
 var context = _host.GetLazerContext();
 
 // 2. Read data (Safe, Detached)
-var sets = context.GetBeatmapSets();
+var sets = context.GetAllBeatmapSets();
 ```
 
 ### Dynamic Access (Advanced)
@@ -19,8 +19,8 @@ var sets = context.GetBeatmapSets();
 The Paws Core API is evolving. If you need to access methods or properties that are present in the underlying Core but not yet exposed in the `ILazerContext` interface, you can use `dynamic` casting.
 
 ```csharp
-// Example: Importing a file (method not yet in Interface)
-((dynamic)context).ImportFile("C:/path/to/image.jpg");
+// Example: Importing a file
+await context.ImportFile("C:/path/to/image.jpg", "image.jpg");
 
 // Example: accessing a raw Hash property
 string hash = ((dynamic)beatmapSet).Hash;
@@ -63,7 +63,7 @@ if (cachedItem != null && cachedItem.Hash == currentHash)
 Read operations use standard DTOs/POCOs.
 
 ```csharp
-var sets = context.GetBeatmapSets();
+var sets = context.GetAllBeatmapSets();
 
 foreach (var set in sets)
 {
@@ -81,6 +81,19 @@ foreach (var set in sets)
 Files in osu!lazer are hashed. To find which file is the background or audio, use `Metadata`.
 
 ```csharp
-var audioFile = map.Metadata?.AudioFile;
 var backgroundFile = map.Metadata?.BackgroundFile;
 ```
+
+## 4. Persisting Changes
+
+In Paws Core, changes to beatmap sets (e.g., removing files) are **NOT** automatically saved. You must explicitly call `UpdateBeatmapSet`.
+
+```csharp
+// 1. Modify the DTO
+set.Files.Remove(fileToDelete);
+
+// 2. Persist the changes
+context.UpdateBeatmapSet(set);
+```
+
+This ensures the database remains in sync with the file system.
