@@ -2,7 +2,7 @@
 
 This document describes the structure of the `client.realm` database used by osu!lazer. It is intended for plugin developers who need to interact with the database directly or via their own local Realm instance, without needing to reference the game's source code.
 
-**Schema Version:** 51 (as of writing)
+**Schema Version:** 51 (10.02.2026)
 **Database Type:** Realm (.NET)
 
 ## 1. Concepts & Storage Logic
@@ -16,7 +16,7 @@ This document describes the structure of the `client.realm` database used by osu
 
 ## 2. Core Models (Tables)
 
-### Beatmaps (Maps & Songs)
+### Beatmaps (Maps & Songs) `[LazerBeatmapMapper.cs]`
 
 #### `BeatmapSetInfo` (The "Song")
 
@@ -66,7 +66,7 @@ Shared metadata for a beatmap (or set).
 
 ---
 
-### File System
+### File System `[LazerFileMapper.cs]`
 
 #### `RealmFile`
 
@@ -85,7 +85,7 @@ Links a filename to a physical file.
 
 ---
 
-### Scoring
+### Scoring `[LazerScoreMapper.cs]`
 
 #### `ScoreInfo`
 
@@ -111,7 +111,7 @@ Represents a replay or score.
 
 ---
 
-### Skins
+### Skins `[LazerSkinMapper.cs]`
 
 #### `SkinInfo`
 
@@ -125,7 +125,7 @@ Represents a replay or score.
 
 ---
 
-### Collections
+### Collections `[LazerCollectionMapper.cs]`
 
 #### `BeatmapCollection`
 
@@ -139,7 +139,7 @@ User-created collections (folders).
 
 ---
 
-### Rulesets & Input
+### Rulesets & Input `[LazerRulesetMapper.cs]`
 
 #### `RulesetInfo`
 
