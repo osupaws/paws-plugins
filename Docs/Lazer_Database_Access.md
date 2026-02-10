@@ -7,7 +7,7 @@ This guide explains how plugins interact with the osu!lazer database using the *
 Do **NOT** attempt to open the game's `client.realm` file directly. This will cause locking issues and crash the game. Instead, use `LazerContext` provided by the host.
 
 ```csharp
-// 1. Obtain the context
+// 1. Obtain the context (IHost provides GetLazerContext)
 var context = _host.GetLazerContext();
 
 // 2. Read data (Safe, Detached)

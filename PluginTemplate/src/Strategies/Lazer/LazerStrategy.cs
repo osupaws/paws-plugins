@@ -1,17 +1,18 @@
 using System;
 using System.Threading.Tasks;
-using MyVuePlugin.Abstractions;
-using MyVuePlugin.Models;
+using MyPlugin.Abstractions;
+using MyPlugin.Models;
 using Paws.Core.Abstractions;
+using Paws.Core.Abstractions.Interfaces.Services;
 
-namespace MyVuePlugin.Strategies.Lazer
+namespace MyPlugin.Strategies.Lazer
 {
     public class LazerStrategy : IMyStrategy
     {
-        private readonly IHostServices _host;
+        private readonly IHost _host;
         public string Name => "Lazer Strategy";
 
-        public LazerStrategy(IHostServices host)
+        public LazerStrategy(IHost host)
         {
             _host = host;
         }

@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
-using MyVuePlugin.Models;
+using MyPlugin.Models;
 
-namespace MyVuePlugin.Abstractions
+namespace MyPlugin.Abstractions
 {
     public interface IMyStrategy
     {

@@ -44,7 +44,7 @@ MyPlugin/
 
 ### The "Router" Pattern
 
-The main plugin class (`MyPlugin.cs`) should act **only** as a router. It should:
+The main plugin class (`MyPlugin.cs`) should implement **`IPawsPlugin`** act **only** as a router. It should:
 
 1.  Receive the request from the UI.
 2.  Deserialize the payload options.
@@ -54,18 +54,29 @@ The main plugin class (`MyPlugin.cs`) should act **only** as a router. It should
 **Example:**
 
 ```csharp
-public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)
+public class MyPlugin : IPawsPlugin
 {
-    var options = JsonSerializer.Deserialize<MyOptions>(...);
+    private IHost? _host;
 
-    // Determine mode (Legacy = Stable, otherwise Lazer)
-    bool isLegacy = ((dynamic)_host).IsLegacyMode;
+    public Task Initialize(IHost host)
+    {
+        _host = host;
+        return Task.CompletedTask;
+    }
 
-    IStrategy strategy = isLegacy
-        ? new StableStrategy(_host)
-        : new LazerStrategy(_host);
+    public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)
+    {
+        var options = JsonSerializer.Deserialize<MyOptions>(...);
 
-    return await strategy.ExecuteAsync(options);
+        // Determine mode (Legacy = Stable, otherwise Lazer)
+        bool isLegacy = ((dynamic)_host).IsLegacyMode;
+
+        IStrategy strategy = isLegacy
+            ? new StableStrategy(_host)
+            : new LazerStrategy(_host);
+
+        return await strategy.ExecuteAsync(options);
+    }
 }
 ```
 

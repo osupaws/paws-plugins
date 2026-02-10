@@ -1,4 +1,4 @@
-namespace MyVuePlugin.Common
+namespace MyPlugin.Common
 {
     public static class Constants
     {

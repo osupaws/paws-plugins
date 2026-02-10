@@ -1,4 +1,9 @@
 using Paws.Core.Abstractions;
+using PawsCleaner.Strategies.Lazer.Components;
+using Paws.Core.Abstractions.Enums;
+using Paws.Core.Abstractions.Interfaces.Contexts;
+using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Models;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
@@ -13,21 +18,23 @@ namespace PawsCleaner.Strategies.Lazer
 {
     public class LazerCleanerStrategy : ICleanerStrategy
     {
-        private readonly IHostServices _host;
+        private readonly IHost _host;
+        private readonly LazerAssetCleaner _assetCleaner;
         public string Name => "Lazer Cleaner";
 
         private const string CACHE_FILENAME = "lazer_cache.realm";
 
-        public LazerCleanerStrategy(IHostServices host)
+        public LazerCleanerStrategy(IHost host)
         {
             _host = host;
+            _assetCleaner = new LazerAssetCleaner(host, Name);
         }
 
         public async Task<object> CleanAsync(CleanerOptions options)
         {
             if (_host == null) return new { Success = false, Message = "Host not initialized." };
 
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
                 var context = _host.GetLazerContext();
                 if (context == null) return new { Success = false, Message = "Failed to access ILazerContext (Core 2.0)." };
@@ -48,18 +55,9 @@ namespace PawsCleaner.Strategies.Lazer
                     Schema = new[] { typeof(CachedLazerSet) }
                 };
 
-                Realm? cacheRealm = null;
-                try
-                {
-                    cacheRealm = Realm.GetInstance(realmConfig);
-                }
-                catch (Exception ex)
-                {
-                    _host.LogMessage($"[CACHE WARNING] Could not open cache DB: {ex.Message}. Caching disabled.", PawsLogLvl.Warning, Name);
-                    try { Realm.DeleteRealm(realmConfig); } catch { } // Safe cleanup if corrupted
-                }
 
                 string currentOptionsHash = CachedLazerSet.ComputeOptionsHash(options);
+                int currentFeaturesMask = CachedLazerSet.ComputeFeaturesMask(options);
                 int skippedByCache = 0;
 
                 int setsProcessed = 0;
@@ -72,37 +70,61 @@ namespace PawsCleaner.Strategies.Lazer
                 try
                 {
                     // 1. Get DTOs (Safe, Detached)
-                    var beatmapSets = context.GetBeatmapSets();
+                    var sets = context.GetAllBeatmapSets();
 
-                    var setsToDelete = new List<Guid>();
-                    var mapsToDelete = new List<Guid>();
+                    var setsToDelete = new List<string>();
+                    var mapsToDelete = new List<string>();
 
                     var setsToProcess = new List<dynamic>(); // Using dynamic to hold references
 
                     // --- FILTERING STEP ---
-                    foreach (var set in beatmapSets)
+                    foreach (var set in sets)
                     {
-                        if (options.DryRun || cacheRealm == null)
+                        if (set.DeletePending)
+                        {
+                            skippedByCache++; // Count as skipped to avoid "Processing 0 sets" confusion if many are pending
+                            continue;
+                        }
+
+                        if (options.DryRun)
                         {
                             setsToProcess.Add(set);
                             continue;
                         }
 
-                        string setIdStr = set.ID.ToString();
-                        string? setHash = null;
-
-                        try { setHash = ((dynamic)set).Hash; } catch { }
-
-                        if (!string.IsNullOrEmpty(setHash))
+                        // Scoped Realm Access for Filtering
+                        bool cacheHit = false;
+                        try
                         {
-                            var cached = cacheRealm.Find<CachedLazerSet>(setIdStr);
-                            if (cached != null && cached.SetHash == setHash && cached.OptionsHash == currentOptionsHash)
+                            using var filterRealm = Realm.GetInstance(realmConfig);
+                            string setIdStr = set.Id.ToString();
+                            string? setHash = set.Hash;
+
+                            if (!string.IsNullOrEmpty(setHash))
                             {
-                                skippedByCache++;
-                                continue;
+                                var cached = filterRealm.Find<CachedLazerSet>(setIdStr);
+                                if (cached != null && cached.SetHash == setHash)
+                                {
+                                    bool featuresCovered = (currentFeaturesMask & ~cached.AppliedFeaturesMask) == 0;
+                                    if (featuresCovered)
+                                    {
+                                        bool bgRequested = options.Assets?.BackgroundMode?.ToLowerInvariant() != "keep";
+                                        if (!bgRequested || cached.OptionsHash == currentOptionsHash)
+                                        {
+                                            skippedByCache++;
+                                            cacheHit = true;
+                                        }
+                                    }
+                                }
                             }
                         }
-                        setsToProcess.Add(set);
+                        catch (Exception ex)
+                        {
+                            // If realm fails, process anyway
+                            _host.LogMessage($"[CACHE] Error accessing cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
+                        }
+
+                        if (!cacheHit) setsToProcess.Add(set);
                     }
 
                     if (skippedByCache > 0 && !options.DryRun)
@@ -110,273 +132,141 @@ namespace PawsCleaner.Strategies.Lazer
 
 
                     // --- PREPARE ASSETS (BG Replacement) ---
-                    var assets = options.Assets;
-                    string bgMode = assets?.BackgroundMode?.ToLowerInvariant() ?? "keep";
-                    dynamic? importedJpg = null;
-                    dynamic? importedPng = null;
-                    bool bgImported = false;
-
-                    if ((bgMode == "white" || bgMode == "custom") && !options.DryRun && setsToProcess.Count > 0)
-                    {
-                        // (Same BG import logic as before)
-                        try
-                        {
-                            string sourceJpg = "";
-                            string sourcePng = "";
-                            bool tempJpgCreated = false;
-                            bool tempPngCreated = false;
-
-                            if (bgMode == "white")
-                            {
-                                string whiteJpgB64 = "/9j/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/aAAgBAQAAAAB/P//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8Af//Z";
-                                string whitePngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAACklEQVR42mNoAAAAggCB2kUIOwAAAABJRU5ErkJggg==";
-
-                                sourceJpg = Path.Combine(Path.GetTempPath(), "paws_white.jpg");
-                                sourcePng = Path.Combine(Path.GetTempPath(), "paws_white.png");
-
-                                File.WriteAllBytes(sourceJpg, Convert.FromBase64String(whiteJpgB64));
-                                File.WriteAllBytes(sourcePng, Convert.FromBase64String(whitePngB64));
-                                tempJpgCreated = true;
-                                tempPngCreated = true;
-                            }
-                            else if (bgMode == "custom" && assets != null)
-                            {
-                                if (!string.IsNullOrEmpty(assets.CustomBackgroundJpg))
-                                {
-                                    try
-                                    {
-                                        string b64 = assets.CustomBackgroundJpg.Contains(",") ? assets.CustomBackgroundJpg.Split(',')[1] : assets.CustomBackgroundJpg;
-                                        sourceJpg = Path.Combine(Path.GetTempPath(), "paws_custom.jpg");
-                                        File.WriteAllBytes(sourceJpg, Convert.FromBase64String(b64));
-                                        tempJpgCreated = true;
-                                    }
-                                    catch { }
-                                }
-                                if (!string.IsNullOrEmpty(assets.CustomBackgroundPng))
-                                {
-                                    try
-                                    {
-                                        string b64 = assets.CustomBackgroundPng.Contains(",") ? assets.CustomBackgroundPng.Split(',')[1] : assets.CustomBackgroundPng;
-                                        sourcePng = Path.Combine(Path.GetTempPath(), "paws_custom.png");
-                                        File.WriteAllBytes(sourcePng, Convert.FromBase64String(b64));
-                                        tempPngCreated = true;
-                                    }
-                                    catch { }
-                                }
-                            }
-
-                            if (!string.IsNullOrEmpty(sourceJpg) && File.Exists(sourceJpg))
-                            {
-                                importedJpg = ((dynamic)context).ImportFile(sourceJpg);
-                                if (tempJpgCreated) File.Delete(sourceJpg);
-                            }
-                            if (!string.IsNullOrEmpty(sourcePng) && File.Exists(sourcePng))
-                            {
-                                importedPng = ((dynamic)context).ImportFile(sourcePng);
-                                if (tempPngCreated) File.Delete(sourcePng);
-                            }
-
-                            if (importedJpg != null || importedPng != null)
-                                bgImported = true;
-                        }
-                        catch (Exception ex)
-                        {
-                            _host.LogMessage($"[BG ERROR] BG Prep failed: {ex.Message}", PawsLogLvl.Error, Name);
-                        }
-                    }
+                    // Using Component
+                    // Using Component
+                    (string? importedJpg, string? importedPng, bool bgImported) = await _assetCleaner.PrepareBackgroundsAsync(context, options);
 
                     // --- PROCESSING LOOP ---
                     _host.LogMessage($"Processing {setsToProcess.Count} sets...", PawsLogLvl.Information, Name);
 
+                    var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var bgFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (var set in setsToProcess)
                     {
-                        bool setModified = false;
+                        if (set.Files == null || set.Files.Count == 0) continue;
+
                         int mapsInSetToDelete = 0;
-                        var filesToRemove = new List<dynamic>();
 
-                        // A. Ruleset Logic
-                        foreach (var map in set.Beatmaps)
+                        try
                         {
-                            int rid = map.RulesetID;
-                            // Gather Source Stats
-                            switch (rid)
-                            {
-                                case 0: srcOsu++; break;
-                                case 1: srcTaiko++; break;
-                                case 2: srcCatch++; break;
-                                case 3: srcMania++; break;
-                                default: srcOther++; break;
-                            }
-
-                            bool keep = true;
-                            // Check options...
-                            switch (rid)
-                            {
-                                case 0: keep = !(options.Rulesets?.Osu ?? false); break;
-                                case 1: keep = !(options.Rulesets?.Taiko ?? false); break;
-                                case 2: keep = !(options.Rulesets?.Catch ?? false); break;
-                                case 3: keep = !(options.Rulesets?.Mania ?? false); break;
-                                default: keep = true; break;
-                            }
-
-                            if (!keep)
-                            {
-                                mapsToDelete.Add(map.ID);
-                                mapsDeleted++;
-                                mapsInSetToDelete++;
-                                setModified = true;
-
-                                switch (rid)
-                                {
-                                    case 0: delOsu++; break;
-                                    case 1: delTaiko++; break;
-                                    case 2: delCatch++; break;
-                                    case 3: delMania++; break;
-                                    default: delOther++; break;
-                                }
-                            }
-                        }
-
-                        // Check if whole set should be deleted
-                        if (set.Beatmaps.Count > 0 && mapsInSetToDelete == set.Beatmaps.Count)
-                        {
-                            setsToDelete.Add(set.ID);
-                            continue; // Skip asset cleaning for this set
-                        }
-
-                        // B. Asset Logic (Only if not deleting whole set)
-                        if (!options.DryRun)
-                        {
-                            // 1. Identify Protected Files
-                            var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            var bgFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+                            // A. Ruleset Logic
                             foreach (var map in set.Beatmaps)
                             {
-                                try
+                                int rid = map.RulesetID;
+                                // Statistics
+                                switch (rid)
                                 {
-                                    string? audio = map.Metadata?.AudioFile;
-                                    if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
+                                    case 0: srcOsu++; break;
+                                    case 1: srcTaiko++; break;
+                                    case 2: srcCatch++; break;
+                                    case 3: srcMania++; break;
+                                    default: srcOther++; break;
                                 }
-                                catch { }
 
-                                string? bg = map.Metadata?.BackgroundFile;
-                                if (!string.IsNullOrEmpty(bg))
+                                bool keep = true;
+                                switch (rid)
                                 {
-                                    bgFiles.Add(bg);
-                                    if (!bgImported) protectedFiles.Add(bg);
+                                    case 0: keep = !(options.Rulesets?.Osu ?? false); break;
+                                    case 1: keep = !(options.Rulesets?.Taiko ?? false); break;
+                                    case 2: keep = !(options.Rulesets?.Catch ?? false); break;
+                                    case 3: keep = !(options.Rulesets?.Mania ?? false); break;
+                                    default: keep = true; break;
+                                }
+
+                                if (!keep)
+                                {
+                                    mapsToDelete.Add(map.Id);
+                                    mapsDeleted++;
+                                    mapsInSetToDelete++;
+
+                                    switch (rid)
+                                    {
+                                        case 0: delOsu++; break;
+                                        case 1: delTaiko++; break;
+                                        case 2: delCatch++; break;
+                                        case 3: delMania++; break;
+                                        default: delOther++; break;
+                                    }
                                 }
                             }
 
-                            if (set.Files != null)
+                            // Check if whole set should be deleted
+                            if (set.Beatmaps.Count > 0 && mapsInSetToDelete == set.Beatmaps.Count)
                             {
-                                foreach (var fileUsage in set.Files)
+                                setsToDelete.Add(set.Id);
+                                continue;
+                            }
+
+                            // B. Asset Cleaning via Component
+                            if (!options.DryRun)
+                            {
+                                // B.1 Populate protected lists from metadata
+                                protectedFiles.Clear();
+                                bgFiles.Clear();
+                                foreach (var map in set.Beatmaps)
                                 {
-                                    string? fname = fileUsage.Filename;
-                                    if (string.IsNullOrEmpty(fname)) continue;
-
-                                    string ext = AssetUtils.GetExtension(fname);
-                                    if (ext == ".osu") continue;
-
-                                    bool isBg = bgFiles.Contains(fname);
-                                    bool isProtected = protectedFiles.Contains(fname);
-
-                                    // BG Replace
-                                    if (isBg && bgImported)
+                                    if (map.Metadata == null) continue;
+                                    string? audio = map.Metadata?.AudioFile;
+                                    if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
+                                    string? bg = map.Metadata?.BackgroundFile;
+                                    if (!string.IsNullOrEmpty(bg))
                                     {
-                                        dynamic? targetReplacement = (ext == ".png") ? (importedPng ?? importedJpg) : (importedJpg ?? importedPng);
-                                        if (targetReplacement != null && fileUsage.File?.Hash != targetReplacement?.Hash)
-                                        {
-                                            fileUsage.File = targetReplacement;
-                                            setModified = true;
-                                        }
-                                        continue;
-                                    }
-
-                                    if (isProtected) continue;
-
-                                    bool shouldUnlink = false;
-
-                                    // Videos
-                                    if (assets?.Videos == true && AssetUtils.IsVideo(ext)) shouldUnlink = true;
-
-                                    // Storyboards
-                                    if (assets?.Storyboards == true)
-                                    {
-                                        if (AssetUtils.IsStoryboard(ext))
-                                        {
-                                            shouldUnlink = true;
-                                        }
-                                        else if (fname.StartsWith("sb/", StringComparison.OrdinalIgnoreCase) || fname.StartsWith("sb\\", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            shouldUnlink = true;
-                                        }
-                                    }
-
-                                    // Skins
-                                    if (assets?.Skins == true && KnownFiles.IsSkinnable(fname) && !isBg) shouldUnlink = true;
-
-                                    // Nuclear
-                                    if (assets?.Videos == true && assets?.Storyboards == true && assets?.Skins == true)
-                                    {
-                                        if (!shouldUnlink && !isProtected && !isBg) shouldUnlink = true;
-                                    }
-
-                                    // Audio
-                                    if (assets?.Sounds == true && AssetUtils.IsAudio(ext) && !isProtected) shouldUnlink = true;
-
-                                    if (shouldUnlink)
-                                    {
-                                        filesToRemove.Add(fileUsage);
-                                        setModified = true;
+                                        bgFiles.Add(bg);
+                                        if (!bgImported) protectedFiles.Add(bg);
                                     }
                                 }
 
-                                foreach (var f in filesToRemove)
+                                int assetRemovals = _assetCleaner.Execute(context, set, options, importedJpg, importedPng, bgFiles, protectedFiles, bgImported);
+                                if (assetRemovals > 0)
                                 {
-                                    set.Files.Remove(f);
+                                    setsProcessed++;
                                 }
                             }
                         }
-
-                        // Apply Updates
-                        if (setModified)
+                        catch (Exception ex)
                         {
-                            setsProcessed++;
-                            if (!options.DryRun)
-                            {
-                                try
-                                {
-                                    ((dynamic)context).UpdateBeatmapSet(set);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _host.LogMessage($"[Set Update Error] {set.ID}: {ex.Message}", PawsLogLvl.Error, Name);
-                                }
-                            }
+                            _host.LogMessage($"[Lazer] Error {ex.Message}", PawsLogLvl.Error, Name);
                         }
 
                         // --- UPDATE CACHE ---
-                        // Only if not dry run, not deleted, and cache is active
-                        if (!options.DryRun && cacheRealm != null && !setsToDelete.Contains(set.ID))
+                        // Only if not dry run, not deleted
+                        if (!options.DryRun && !setsToDelete.Contains(set.Id))
                         {
                             // Retrieve updated hash
-                            string setIdStr = set.ID.ToString();
-                            string? newHash = null;
-                            try { newHash = ((dynamic)set).Hash; } catch { }
+                            string setIdStr = set.Id.ToString();
+                            string? newHash = set.Hash;
 
                             if (!string.IsNullOrEmpty(newHash))
                             {
-                                cacheRealm!.Write(() =>
+                                try
                                 {
-                                    cacheRealm.Add(new CachedLazerSet
+                                    using var updateRealm = Realm.GetInstance(realmConfig);
+                                    updateRealm.Write(() =>
                                     {
-                                        SetId = setIdStr,
-                                        SetHash = newHash,
-                                        OptionsHash = currentOptionsHash,
-                                        LastCleanTime = DateTimeOffset.UtcNow
-                                    }, update: true);
-                                });
+                                        var existing = updateRealm.Find<CachedLazerSet>(setIdStr);
+                                        int mergedMask = currentFeaturesMask;
+
+                                        // If same version, accumulate features
+                                        if (existing != null && existing.SetHash == newHash)
+                                        {
+                                            mergedMask |= existing.AppliedFeaturesMask;
+                                        }
+
+                                        updateRealm.Add(new CachedLazerSet
+                                        {
+                                            SetId = setIdStr,
+                                            SetHash = newHash,
+                                            AppliedFeaturesMask = mergedMask,
+                                            OptionsHash = currentOptionsHash,
+                                            LastCleanTime = DateTimeOffset.UtcNow
+                                        }, update: true);
+                                    });
+                                }
+                                catch (Exception ex)
+                                {
+                                    _host.LogMessage($"[CACHE] Error updating cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
+                                }
                             }
                         }
                     }
@@ -387,7 +277,7 @@ namespace PawsCleaner.Strategies.Lazer
                         if (options.DryRun) _host.LogMessage($"[DRY RUN] Would delete {mapsToDelete.Count} beatmaps.", PawsLogLvl.Information, Name);
                         else
                         {
-                            ((dynamic)context).DeleteBeatmaps(mapsToDelete);
+                            context.DeleteBeatmaps(mapsToDelete);
                         }
                     }
 
@@ -396,18 +286,23 @@ namespace PawsCleaner.Strategies.Lazer
                         if (options.DryRun) _host.LogMessage($"[DRY RUN] Would delete {setsToDelete.Count} beatmap sets.", PawsLogLvl.Information, Name);
                         else
                         {
-                            ((dynamic)context).DeleteBeatmapSets(setsToDelete);
+                            context.DeleteBeatmapSets(setsToDelete);
                             // Clean cache for deleted sets
-                            if (cacheRealm != null)
+                            try
                             {
-                                cacheRealm.Write(() =>
+                                using var deleteRealm = Realm.GetInstance(realmConfig);
+                                deleteRealm.Write(() =>
                                 {
                                     foreach (var sid in setsToDelete)
                                     {
-                                        var obj = cacheRealm.Find<CachedLazerSet>(sid.ToString());
-                                        if (obj != null) cacheRealm.Remove(obj);
+                                        var obj = deleteRealm.Find<CachedLazerSet>(sid.ToString());
+                                        if (obj != null) deleteRealm.Remove(obj);
                                     }
                                 });
+                            }
+                            catch (Exception ex)
+                            {
+                                _host.LogMessage($"[CACHE] Error cleaning deletion cache: {ex.Message}", PawsLogLvl.Warning, Name);
                             }
                         }
                     }
@@ -417,10 +312,10 @@ namespace PawsCleaner.Strategies.Lazer
                     {
                         try
                         {
-                            List<string> safeOrphans = ((dynamic)context).GetSafeOrphanHashes();
+                            List<string> safeOrphans = context.GetSafeOrphanHashes();
                             if (safeOrphans.Count > 0)
                             {
-                                ((dynamic)context).DeleteFiles(safeOrphans);
+                                context.DeleteFiles(safeOrphans);
                             }
                         }
                         catch { }
@@ -438,11 +333,9 @@ namespace PawsCleaner.Strategies.Lazer
                     _host.LogMessage($"Lazer cleanup error: {ex}", PawsLogLvl.Error, Name);
                     return new { Success = false, Message = $"Error: {ex.Message}" };
                 }
-                finally
-                {
-                    cacheRealm?.Dispose();
-                }
             });
         }
     }
 }
+
+

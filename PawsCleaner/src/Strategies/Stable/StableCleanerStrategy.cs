@@ -1,25 +1,34 @@
 using Paws.Core.Abstractions;
+using Paws.Core.Abstractions.Enums;
+using Paws.Core.Abstractions.Interfaces.Contexts;
+using Paws.Core.Abstractions.Interfaces.Services;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
 using Realms;
 using Realms.Schema;
 
+using PawsCleaner.Strategies.Stable.Components;
+
 namespace PawsCleaner.Strategies.Stable
 {
     public class StableCleanerStrategy : ICleanerStrategy
     {
-        private readonly IHostServices _host;
+        private readonly IHost _host;
         private readonly string _indexDbPath;
+        private readonly StableIndexer _indexer;
+        private readonly StableAssetCleaner _assetCleaner;
         public string Name => "Stable Cleaner";
 
-        public StableCleanerStrategy(IHostServices host)
+        public StableCleanerStrategy(IHost host)
         {
             _host = host;
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var pluginData = Path.Combine(appData, "PawsCleaner");
             Directory.CreateDirectory(pluginData);
             _indexDbPath = Path.Combine(pluginData, "stable_index.realm");
+            _indexer = new StableIndexer(host, Name);
+            _assetCleaner = new StableAssetCleaner(host, Name);
         }
 
         public async Task<object> CleanAsync(CleanerOptions options)
@@ -188,6 +197,15 @@ namespace PawsCleaner.Strategies.Stable
                             if (Directory.Exists(mapFolder))
                             {
                                 var lastWrite = Directory.GetLastWriteTimeUtc(mapFolder);
+
+                                // Check .osu file timestamp too, as folder time doesn't change on file content edit
+                                var osuPath = Path.Combine(mapFolder, map.FileName);
+                                if (File.Exists(osuPath))
+                                {
+                                    var osuWrite = File.GetLastWriteTimeUtc(osuPath);
+                                    if (osuWrite > lastWrite) lastWrite = osuWrite;
+                                }
+
                                 if (lastWrite > indexed.LastIndexedTime.AddSeconds(5))
                                     needsIndex = true;
                             }
@@ -213,11 +231,11 @@ namespace PawsCleaner.Strategies.Stable
                     if (mapsToIndex.Count > 0)
                     {
                         _host.LogMessage($"Indexing {mapsToIndex.Count} maps...", PawsLogLvl.Information, Name);
-                        IndexMaps(realm, stable, mapsToIndex, songDir);
+                        _indexer.IndexMaps(realm, stable, mapsToIndex, songDir);
                     }
 
                     // Execute Cleaning
-                    ExecuteAssetCleaning(realm, options, songDir, ref deletedFiles, ref freedBytes);
+                    _assetCleaner.ExecuteAssetCleaning(realm, options, songDir, ref deletedFiles, ref freedBytes);
                 }
             });
 
@@ -235,288 +253,5 @@ namespace PawsCleaner.Strategies.Stable
             };
         }
 
-        private void ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, ref int deletedFiles, ref long freedBytes)
-        {
-            var assets = options.Assets;
-            if (assets == null) return;
-
-            string pluginDataDir = Path.GetDirectoryName(_indexDbPath) ?? string.Empty;
-            if (string.IsNullOrEmpty(pluginDataDir)) pluginDataDir = Path.GetTempPath();
-
-            string srcJpg = Path.Combine(pluginDataDir, "paws_stable_src.jpg");
-            string srcPng = Path.Combine(pluginDataDir, "paws_stable_src.png");
-            string bgMode = assets.BackgroundMode?.ToLowerInvariant() ?? "keep";
-            bool srcCreated = false;
-
-            try
-            {
-                if (bgMode == "white" || bgMode == "custom")
-                {
-                    try { if (File.Exists(srcJpg)) File.Delete(srcJpg); } catch { }
-                    try { if (File.Exists(srcPng)) File.Delete(srcPng); } catch { }
-
-                    if (bgMode == "white")
-                    {
-                        string whiteJpgB64 = "/9j/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/aAAgBAQAAAAB/P//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8Af//Z";
-                        string whitePngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
-
-                        File.WriteAllBytes(srcJpg, Convert.FromBase64String(whiteJpgB64));
-                        File.WriteAllBytes(srcPng, Convert.FromBase64String(whitePngB64));
-                        srcCreated = true;
-                    }
-                    else if (bgMode == "custom")
-                    {
-                        if (!string.IsNullOrEmpty(assets.CustomBackgroundJpg))
-                        {
-                            try
-                            {
-                                string b64 = assets.CustomBackgroundJpg.Contains(",") ? assets.CustomBackgroundJpg.Split(',')[1] : assets.CustomBackgroundJpg;
-                                File.WriteAllBytes(srcJpg, Convert.FromBase64String(b64));
-                                srcCreated = true;
-                            }
-                            catch { }
-                        }
-                        if (!string.IsNullOrEmpty(assets.CustomBackgroundPng))
-                        {
-                            try
-                            {
-                                string b64 = assets.CustomBackgroundPng.Contains(",") ? assets.CustomBackgroundPng.Split(',')[1] : assets.CustomBackgroundPng;
-                                File.WriteAllBytes(srcPng, Convert.FromBase64String(b64));
-                                srcCreated = true;
-                            }
-                            catch { }
-                        }
-                    }
-                }
-
-                var allIndexed = realm.All<IndexedBeatmap>().ToList();
-                int itemsProcessed = 0;
-
-                bool isNuke = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
-                _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, Name);
-
-                if (options.DryRun)
-                {
-                    _host.LogMessage("--- DRY RUN STARTED ---", PawsLogLvl.Warning, Name);
-                }
-
-                foreach (var map in allIndexed)
-                {
-                    var mapFolder = Path.Combine(songDir, map.FolderPath);
-                    if (!Directory.Exists(mapFolder)) continue;
-
-                    foreach (var file in map.Files)
-                    {
-                        bool shouldDelete = false;
-                        bool isReplacement = false;
-                        string replacementSource = "";
-
-                        // Bitmask Usage: 1=BG, 2=Audio, 4=Video, 8=SB, 16=Script
-                        bool isBg = (file.UsageType & 1) != 0;
-                        bool isScript = (file.UsageType & 16) != 0;
-                        bool isAudio = (file.UsageType & 2) != 0;
-                        bool isVideo = (file.UsageType & 4) != 0;
-                        bool isSb = (file.UsageType & 8) != 0;
-
-                        // --- Background Replacement Logic ---
-                        if (isBg && (bgMode == "white" || bgMode == "custom") && srcCreated)
-                        {
-                            string targetExt = file.Extension.ToLower();
-                            replacementSource = (targetExt == ".png") ? srcPng : srcJpg;
-                            if (!File.Exists(replacementSource)) replacementSource = srcJpg;
-
-                            if (File.Exists(replacementSource))
-                            {
-                                shouldDelete = true;
-                                isReplacement = true;
-                            }
-                        }
-
-                        // --- Nuke Mode vs Granular Logic ---
-                        if (isNuke)
-                        {
-                            if (isBg)
-                            {
-                                if (bgMode == "keep")
-                                {
-                                    shouldDelete = false;
-                                    isReplacement = false;
-                                }
-                            }
-                            else if (isScript || isAudio)
-                            {
-                                shouldDelete = false;
-                            }
-                            else
-                            {
-                                shouldDelete = true;
-                            }
-                        }
-                        else if (!isBg) // Normal Mode (Non-BG items)
-                        {
-                            if (assets.Storyboards && isSb) shouldDelete = true;
-                            if (assets.Videos && isVideo) shouldDelete = true;
-                            if (assets.Skins && file.IsSkinnable && (AssetUtils.IsSkinImage(file.Extension))) shouldDelete = true;
-                            if (assets.Sounds && file.IsSkinnable && (AssetUtils.IsAudio(file.Extension)))
-                            {
-                                if (!isAudio) shouldDelete = true;
-                            }
-                        }
-
-                        if (shouldDelete)
-                        {
-                            var fullPath = Path.Combine(mapFolder, file.Filename);
-                            if (File.Exists(fullPath))
-                            {
-                                if (!options.DryRun)
-                                {
-                                    try
-                                    {
-                                        var fi = new FileInfo(fullPath);
-                                        freedBytes += fi.Length;
-                                        File.Delete(fullPath);
-                                        deletedFiles++;
-
-                                        if (isReplacement && File.Exists(replacementSource))
-                                        {
-                                            try
-                                            {
-                                                File.CreateSymbolicLink(fullPath, replacementSource);
-                                            }
-                                            catch
-                                            {
-                                                File.Copy(replacementSource, fullPath, true);
-                                            }
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
-                        }
-                    }
-                    itemsProcessed++;
-                }
-
-                if (options.DryRun)
-                {
-                    _host.LogMessage("--- DRY RUN FINISHED ---", PawsLogLvl.Warning, Name);
-                }
-            }
-            catch (Exception ex)
-            {
-                _host.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, Name);
-            }
-        }
-
-        private void IndexMaps(Realm realm, StableContext stable, List<dynamic> maps, string songDir)
-        {
-            int i = 0;
-            foreach (var map in maps)
-            {
-                string folderPath = Path.Combine(songDir, map.FolderName);
-                if (!Directory.Exists(folderPath)) continue;
-
-                var allFiles = Directory.GetFiles(folderPath);
-                var assetsUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
-                void Mark(string f, int m) => MarkUsage(assetsUsage, f, m);
-
-                foreach (var file in allFiles)
-                {
-                    var ext = Path.GetExtension(file).ToLowerInvariant();
-                    string fname = Path.GetFileName(file);
-
-                    if (ext == ".osu")
-                    {
-                        try
-                        {
-                            Mark(fname, 16);
-                            var beatmap = stable.ParseBeatmap(file);
-
-                            if (!string.IsNullOrEmpty(beatmap.AudioFilename)) Mark(beatmap.AudioFilename, 2);
-                            if (!string.IsNullOrEmpty(beatmap.BackgroundImage)) Mark(beatmap.BackgroundImage, 1);
-                            if (!string.IsNullOrEmpty(beatmap.Video)) Mark(beatmap.Video, 4);
-
-                            if (beatmap.EventsStoryboard != null)
-                            {
-                                foreach (var sbFile in beatmap.EventsStoryboard.GetAllReferencedFiles())
-                                {
-                                    Mark(sbFile, 8);
-                                }
-                            }
-
-                            foreach (var sample in beatmap.GetHitSoundSamples())
-                            {
-                                Mark(sample, 2);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _host.LogMessage($"[Index] Failed to parse {fname}: {ex.Message}", PawsLogLvl.Error, Name);
-                        }
-                    }
-                    else if (ext == ".osb")
-                    {
-                        try
-                        {
-                            Mark(fname, 16);
-                            var sb = stable.ParseStoryboard(file);
-                            foreach (var sbFile in sb.GetAllReferencedFiles())
-                            {
-                                Mark(sbFile, 8);
-                            }
-                        }
-                        catch { }
-                    }
-                }
-
-                realm.Write(() =>
-                {
-                    var existing = realm.Find<IndexedBeatmap>(map.MD5Hash);
-                    if (existing != null) realm.Remove(existing);
-
-                    var indexedMap = new IndexedBeatmap
-                    {
-                        Hash = map.MD5Hash,
-                        FolderPath = map.FolderName,
-                        LastIndexedTime = DateTimeOffset.UtcNow
-                    };
-
-                    foreach (var filePath in allFiles)
-                    {
-                        string fileName = Path.GetFileName(filePath);
-                        string ext = Path.GetExtension(fileName).ToLowerInvariant();
-
-                        int usage = 0;
-                        if (assetsUsage.TryGetValue(fileName, out var u)) usage = u;
-
-                        bool isSkinnable = KnownFiles.IsSkinnable(fileName);
-
-                        indexedMap.Files.Add(new IndexedFile
-                        {
-                            Filename = fileName,
-                            Extension = ext,
-                            UsageType = usage,
-                            IsSkinnable = isSkinnable
-                        });
-                    }
-                    realm.Add(indexedMap);
-                });
-
-                i++;
-                if (i % 50 == 0) _host.LogMessage($"Indexed {i}/{maps.Count}...", PawsLogLvl.Information, Name);
-            }
-        }
-
-        private void MarkUsage(Dictionary<string, int> dict, string filename, int mask)
-        {
-            string cleanName = filename.Replace("\"", "").Trim();
-            if (string.IsNullOrEmpty(cleanName)) return;
-
-            if (dict.TryGetValue(cleanName, out int currentMask))
-                dict[cleanName] = currentMask | mask;
-            else
-                dict[cleanName] = mask;
-        }
     }
 }

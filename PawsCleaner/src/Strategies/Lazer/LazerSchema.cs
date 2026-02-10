@@ -19,7 +19,29 @@ namespace PawsCleaner.Strategies.Lazer
 
         public string OptionsHash { get; set; } = ""; // Hash of the options used for cleaning
 
+        public int AppliedFeaturesMask { get; set; } // Bitmask of CleanerFeatures
+
         public DateTimeOffset LastCleanTime { get; set; }
+
+        public static int ComputeFeaturesMask(CleanerOptions options)
+        {
+            int mask = 0;
+            if (options.Assets?.Videos == true) mask |= 1;
+            if (options.Assets?.Storyboards == true) mask |= 2;
+            if (options.Assets?.Skins == true) mask |= 4;
+            if (options.Assets?.Sounds == true) mask |= 8;
+
+            if (options.Rulesets?.Osu == true) mask |= 16;
+            if (options.Rulesets?.Taiko == true) mask |= 32;
+            if (options.Rulesets?.Catch == true) mask |= 64;
+            if (options.Rulesets?.Mania == true) mask |= 128;
+
+            // BG (256) removed from mask to ensure re-runs if BG options change
+            // if (options.Assets?.BackgroundMode != null && options.Assets.BackgroundMode.ToLowerInvariant() != "keep")
+            //    mask |= 256;
+
+            return mask;
+        }
 
         public static string ComputeOptionsHash(CleanerOptions options)
         {

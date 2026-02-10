@@ -4,7 +4,7 @@ This guide explains how plugins interact with the **osu!stable** installation us
 
 ## 1. Getting Access
 
-Use the `IHostServices.GetStableContext()` method. This returns a stateless context object that serves as a factory/gateway for reading stable files.
+Use the `IHost.GetStableContext()` method. This returns a stateless context object that serves as a factory/gateway for reading stable files.
 
 ```csharp
 // In your strategy:
@@ -53,6 +53,6 @@ Parsing `.osu` files is slow. If your plugin scans thousands of maps (like a Cle
 
 1.  Create a local **Realm** database in your plugin's data folder.
 2.  Store an index of parsed results (`IndexedBeatmap`).
-3.  Only re-parse if the folder's `LastWriteTime` has changed.
+3.  Only re-parse if the folder's `LastWriteTime` OR the individual `.osu` file's `LastWriteTime` has changed (as modifying a map in the editor updates the file but sometimes not the folder timestamp).
 
 See `PawsCleaner` source code for a reference implementation of this Indexing pattern.

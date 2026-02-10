@@ -11,6 +11,12 @@ namespace PawsCleaner.Strategies.Stable
 
         public DateTimeOffset LastIndexedTime { get; set; } // For detecting folder changes (re-download check)
 
+        public DateTimeOffset LastCleanTime { get; set; } // When the cleanup was last performed
+
+        public int AppliedFeaturesMask { get; set; } // Bitmask of CleanerFeatures (matching Lazer bitmask)
+
+        public int ContentMask { get; set; } // Bitmask of what the map ACTUALLY HAS (Videos, SB, etc.)
+
         public IList<IndexedFile> Files { get; } = null!;
     }
 

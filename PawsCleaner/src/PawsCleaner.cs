@@ -1,4 +1,7 @@
 using Paws.Core.Abstractions;
+using Paws.Core.Abstractions.Enums;
+using Paws.Core.Abstractions.Interfaces;
+using Paws.Core.Abstractions.Interfaces.Services;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Models;
 using PawsCleaner.Strategies.Lazer;
@@ -7,21 +10,21 @@ using System.Text.Json;
 
 namespace PawsCleaner
 {
-    public class PawsCleanerPlugin : IFunctionalExplicitPlugin
+    public class PawsCleanerPlugin : IPawsPlugin
     {
-        public Guid Id => Guid.Parse("d34db33f-c001-4c33-9999-c1ea4e700001");
+        public string Id => "osupaws.cleaner";
         public string Name => "Paws Cleaner";
         public string Description => "Efficiently clean up unused osu! files.";
         public string Version => "0.0.1";
         public string IconName => "delete";
 
-        private IHostServices? _host;
+        private IHost? _host;
 
-        public async Task Initialize(IHostServices hostServices)
+        public Task Initialize(IHost host)
         {
-            _host = hostServices;
+            _host = host;
             _host.LogMessage($"{Name} initialized (Strategy Pattern)!", PawsLogLvl.Information, Name);
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)
@@ -45,8 +48,7 @@ namespace PawsCleaner
                 {
                     if (_host != null)
                     {
-                        var dynHost = (dynamic)_host;
-                        isLegacy = dynHost.IsLegacyMode;
+                        isLegacy = _host.IsLegacyMode;
                     }
                 }
                 catch

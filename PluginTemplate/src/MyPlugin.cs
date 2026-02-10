@@ -1,32 +1,34 @@
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
-using MyVuePlugin.Abstractions;
-using MyVuePlugin.Models;
-using MyVuePlugin.Strategies.Lazer;
-using MyVuePlugin.Strategies.Stable;
+using MyPlugin.Abstractions;
+using MyPlugin.Models;
+using MyPlugin.Strategies.Lazer;
+using MyPlugin.Strategies.Stable;
 using Paws.Core.Abstractions;
+using Paws.Core.Abstractions.Interfaces;
+using Paws.Core.Abstractions.Interfaces.Services;
 
 namespace MyPlugin
 {
-    public class MyPlugin : IFunctionalExplicitPlugin
+    public class MyPlugin : IPawsPlugin
     {
-        public Guid Id => Guid.Parse("11111111-1111-1111-1111-111111111111");
+        public string Id => "author.template-plugin";
 
         public string Name => "My Plugin";
         public string Description => "A template plugin using the Strategy Pattern.";
-        public string Version => "1.0.0";
+        public string Version => "1.0.1";
         public string IconName => "palette";
 
-        private IHostServices? _host;
+        private IHost? _host;
 
-        public async Task Initialize(IHostServices hostServices)
+        public Task Initialize(IHost host)
         {
-            _host = hostServices;
+            _host = host;
             // Initialization logic (e.g. logging)
             _host.LogMessage($"{Name} initialized correctly!", PawsLogLvl.Information, "MyPlugin");
 
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)

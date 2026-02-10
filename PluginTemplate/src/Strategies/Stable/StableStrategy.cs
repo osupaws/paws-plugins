@@ -1,17 +1,18 @@
 using System;
 using System.Threading.Tasks;
-using MyVuePlugin.Abstractions;
-using MyVuePlugin.Models;
+using MyPlugin.Abstractions;
+using MyPlugin.Models;
 using Paws.Core.Abstractions;
+using Paws.Core.Abstractions.Interfaces.Services;
 
-namespace MyVuePlugin.Strategies.Stable
+namespace MyPlugin.Strategies.Stable
 {
     public class StableStrategy : IMyStrategy
     {
-        private readonly IHostServices _host;
+        private readonly IHost _host;
         public string Name => "Stable Strategy";
 
-        public StableStrategy(IHostServices host)
+        public StableStrategy(IHost host)
         {
             _host = host;
         }

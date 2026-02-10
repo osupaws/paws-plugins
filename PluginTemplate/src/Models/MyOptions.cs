@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace MyVuePlugin.Models
+namespace MyPlugin.Models
 {
     public class MyOptions
     {
