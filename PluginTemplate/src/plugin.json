@@ -1,13 +1,13 @@
 {
-  "id": "com.example.vueplugin",
-  "name": "My Vue Plugin",
-  "version": "1.0.0",
+  "id": "author.template-plugin",
+  "name": "My Plugin",
+  "version": "1.0.1",
   "author": "Your Name",
-  "description": "A Vue 3 powered plugin.",
-  "entryPoint": "MyVuePlugin.dll",
+  "description": "A starter plugin template demonstrating the Strategy Pattern.",
+  "minAppVersion": "1.0.0",
+  "icon": "icon.svg",
+  "entryPoint": "MyPlugin.dll",
   "ui": {
     "entry": "ui/index.html"
-  },
-  "icon": "icon.svg",
-  "minAppVersion": "1.0.0"
+  }
 }

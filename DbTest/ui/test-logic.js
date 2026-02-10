@@ -43,56 +43,20 @@ document.addEventListener("DOMContentLoaded", () => {
 		}
 	}
 
-	document.getElementById("read-btn").addEventListener("click", () => executeTest("test-read"));
-	document.getElementById("write-btn").addEventListener("click", () => executeTest("test-write"));
-
-	// --- SECURITY TEST SCRIPT ---
-	async function runSecurityTests() {
-		const resultsDiv = document.getElementById("security-test-results");
-		resultsDiv.innerHTML = "Running tests...";
-
-		const victimPluginGuid = "A7D5220B-13C0-466A-9284-3C3457256A4B";
-		let resultsHTML = "";
-
-        // Test 0: Test self-resource loading (styles.css via <link> tag)
-        // This test is implicitly passed if the styles for this button look correct.
-
-		// Test 1: Attack another plugin (should fail with 403 Forbidden)
-		try {
-			const response = await fetch(`paws-plugin://${victimPluginGuid}/secret.txt`);
-			if (response.status === 403) {
-				resultsHTML += `<p style="color: limegreen;">[PASS] Test 1: Fetch from another plugin correctly failed with 403 Forbidden.</p>`;
-			} else {
-				resultsHTML += `<p style="color: red;">[FAIL] Test 1: Got unexpected status ${response.status}. Expected 403.</p>`;
-			}
-		} catch (e) {
-			resultsHTML += `<p style="color: red;">[FAIL] Test 1: Fetch from another plugin failed with a network error instead of a 403 status: ${e.message}</p>`;
-		}
-
-		// Test 2: Access a valid system resource (should succeed)
-		try {
-			const response = await fetch("paws-app://paws-frontend-api.js");
-			if (response.ok) {
-				resultsHTML += `<p style="color: limegreen;">[PASS] Test 2: Fetch from paws-app:// correctly succeeded.</p>`;
-			} else {
-				resultsHTML += `<p style="color: red;">[FAIL] Test 2: Got unexpected status ${response.status} for a valid system resource.</p>`;
-			}
-		} catch (e) {
-			resultsHTML += `<p style="color: red;">[FAIL] Test 2: Fetch from paws-app:// failed with an error: ${e.message}</p>`;
-		}
-
-		// Test 3: Access a theme file (should fail with a network error because of cross-origin)
-		try {
-			const response = await fetch("paws-theme://matrix-dark-theme/theme.css");
-            // We don't expect to get here. If we do, it's a failure.
-			resultsHTML += `<p style="color: red;">[FAIL] Test 3: Fetch from paws-theme:// did not throw a network error. Status: ${response.status}</p>`;
-
-		} catch (e) {
-			resultsHTML += `<p style="color: limegreen;">[PASS] Test 3: Fetch from paws-theme:// correctly failed with a cross-origin/network error.</p>`;
-		}
-
-		resultsDiv.innerHTML = resultsHTML;
+	// --- API Button Bindings ---
+	
+	function bindBtn(id, command) {
+		const btn = document.getElementById(id);
+		if (btn) btn.addEventListener("click", () => executeTest(command));
 	}
 
-	document.getElementById("run-security-tests").addEventListener("click", runSecurityTests);
+	bindBtn("stable-db-btn", "test-stable-db");
+	bindBtn("stable-scores-btn", "test-stable-scores");
+	bindBtn("stable-parse-btn", "test-stable-parse");
+	bindBtn("stable-scan-btn", "test-stable-scan");
+	
+	bindBtn("lazer-sets-btn", "test-lazer-db");
+	bindBtn("lazer-files-btn", "test-lazer-files");
+
+	// Security tests removed by user request
 });

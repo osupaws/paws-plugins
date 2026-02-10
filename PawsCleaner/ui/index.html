@@ -1,12 +1,18 @@
-<!DOCTYPE html>
-<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vue Plugin</title>
+    <title>Paws Cleaner</title>
+    
+    <!-- Paws Theme Integration -->
+    <link rel="stylesheet" href="paws-app://paws-theme-base.css" />
+    <link id="paws-theme-base-link" rel="stylesheet" href="" />
+    <link id="paws-theme-custom-link" rel="stylesheet" href="" />
   </head>
   <body>
     <div id="app"></div>
+    
+    <!-- Paws Frontend API (Theme injection & Bridge) -->
+    <script src="paws-app://paws-frontend-api.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

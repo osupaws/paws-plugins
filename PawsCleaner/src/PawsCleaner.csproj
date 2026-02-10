@@ -14,6 +14,8 @@
       <HintPath>..\..\Libs\Paws.Core.Abstractions.dll</HintPath>
       <Private>false</Private>
     </Reference>
+
+    <PackageReference Include="Realm" Version="20.1.0" PrivateAssets="all" />
   </ItemGroup>
 
   <Target Name="PackagePawsPlugin" AfterTargets="Build" Condition=" '$(Configuration)' == 'Release' ">
@@ -44,4 +46,12 @@
     <Message Text="SUCCESS: Plugin created at $(ProjectDir)..\dist\$(PawsPluginName).pawsplugin" Importance="high" />
   </Target>
 
+  <ItemGroup>
+    <None Update="Resources\white.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\white.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

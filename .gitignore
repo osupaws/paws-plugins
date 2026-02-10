@@ -11,6 +11,7 @@ Desktop.ini
 *.suo
 *.sln.docstates
 *.userprefs
+.agent/
 
 # .NET
 [Bb]in/
