@@ -2,6 +2,7 @@ using Paws.Core.Abstractions;
 using Paws.Core.Abstractions.Enums;
 using Paws.Core.Abstractions.Interfaces.Contexts;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
@@ -27,9 +28,9 @@ namespace PawsCleaner.Strategies.Stable.Components
             foreach (var map in maps)
             {
                 string folderPath = Path.Combine(songDir, map.FolderName);
-                if (!Directory.Exists(folderPath)) continue;
+                if (!_host.Storage.DirectoryExists(folderPath)) continue;
 
-                var allFiles = Directory.GetFiles(folderPath);
+                var allFiles = _host.Storage.GetFiles(folderPath);
                 var assetsUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
                 void Mark(string f, int m) => MarkUsage(assetsUsage, f, m);
@@ -65,7 +66,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                         }
                         catch (Exception ex)
                         {
-                            _host.LogMessage($"[Index] Failed to parse {fname}: {ex.Message}", PawsLogLvl.Error, _name);
+                            _host.Logger.LogMessage($"[Index] Failed to parse {fname}: {ex.Message}", PawsLogLvl.Error, _name);
                         }
                     }
                     else if (ext == ".osb")
@@ -153,7 +154,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                 });
 
                 i++;
-                if (i % 50 == 0) _host.LogMessage($"Indexed {i}/{maps.Count}...", PawsLogLvl.Information, _name);
+                if (i % 50 == 0) _host.Logger.LogMessage($"Indexed {i}/{maps.Count}...", PawsLogLvl.Information, _name);
             }
         }
 

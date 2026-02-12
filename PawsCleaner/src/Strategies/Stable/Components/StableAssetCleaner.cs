@@ -3,11 +3,13 @@ using Paws.Core.Abstractions.Enums;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
+using Paws.Core.Abstractions.Models;
 using Realms;
 using System.Text;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces;
 
 namespace PawsCleaner.Strategies.Stable.Components
 {
@@ -16,7 +18,12 @@ namespace PawsCleaner.Strategies.Stable.Components
         private readonly IHost _host;
         private readonly string _name;
 
-        // Duplicate method from Lazer Schema or move to Common
+        public StableAssetCleaner(IHost host, string strategyName)
+        {
+            _host = host;
+            _name = strategyName;
+        }
+
         public static string ComputeOptionsHash(CleanerOptions options)
         {
             var json = JsonSerializer.Serialize(options, new JsonSerializerOptions { WriteIndented = false });
@@ -25,242 +32,227 @@ namespace PawsCleaner.Strategies.Stable.Components
             return Convert.ToBase64String(bytes);
         }
 
-        public StableAssetCleaner(IHost host, string strategyName)
-        {
-            _host = host;
-            _name = strategyName;
-        }
-
-        public void ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, ref int deletedFiles, ref long freedBytes)
+        public async Task<(string? srcJpg, string? srcPng, bool srcCreated)> PrepareBackgroundsAsync(CleanerOptions options)
         {
             var assets = options.Assets;
-            if (assets == null) return;
+            if (assets == null) return (null, null, false);
 
-            string pluginDataDir = Path.GetDirectoryName(realm.Config.DatabasePath) ?? string.Empty;
-            if (string.IsNullOrEmpty(pluginDataDir)) pluginDataDir = Path.GetTempPath();
-
-            string srcJpg = Path.Combine(pluginDataDir, "paws_stable_src.jpg");
-            string srcPng = Path.Combine(pluginDataDir, "paws_stable_src.png");
             string bgMode = assets.BackgroundMode?.ToLowerInvariant() ?? "keep";
-            bool srcCreated = false;
+            if (bgMode != "white" && bgMode != "custom") return (null, null, false);
 
             try
             {
-                if (bgMode == "white" || bgMode == "custom")
+                string dataDir = _host.Storage.GetPluginDataPath();
+                string tempDir = _host.Storage.GetPluginTempPath();
+
+                string? srcJpg = null;
+                string? srcPng = null;
+
+                if (bgMode == "white")
                 {
-                    try { if (File.Exists(srcJpg)) File.Delete(srcJpg); } catch { }
-                    try { if (File.Exists(srcPng)) File.Delete(srcPng); } catch { }
+                    srcJpg = Path.Combine(dataDir, "white_bg.jpg");
+                    srcPng = Path.Combine(dataDir, "white_bg.png");
 
-                    if (bgMode == "white")
+                    if (!_host.Storage.FileExists(srcJpg) || !_host.Storage.FileExists(srcPng))
                     {
-                        string whiteJpgB64 = "/9j/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/aAAgBAQAAAAB/P//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8Af//Z";
-                        string whitePngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+                        _host.Logger.LogMessage("[BG] Generating persistent white backgrounds (Stable)...", PawsLogLvl.Information, _name);
+                        byte[] whiteJpg = { 0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x05, 0x03, 0x03, 0x03, 0x03, 0x03, 0x06, 0x04, 0x04, 0x03, 0x05, 0x07, 0x06, 0x07, 0x07, 0x07, 0x06, 0x07, 0x07, 0x08, 0x09, 0x0B, 0x09, 0x08, 0x08, 0x0A, 0x08, 0x07, 0x07, 0x0A, 0x0D, 0x0A, 0x0A, 0x0B, 0x0C, 0x0C, 0x0C, 0x0C, 0x07, 0x09, 0x0E, 0x0F, 0x0D, 0x0C, 0x0E, 0x0B, 0x0C, 0x0C, 0x0C, 0xFF, 0xC2, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x3F, 0xFF, 0xC4, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x01, 0x3F, 0x00, 0x7F, 0xFF, 0xD9 };
+                        byte[] whitePng = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x37, 0x6E, 0xF9, 0x24, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x68, 0x00, 0x00, 0x00, 0x82, 0x00, 0x81, 0xDA, 0x45, 0x08, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82 };
 
-                        File.WriteAllBytes(srcJpg, Convert.FromBase64String(whiteJpgB64));
-                        File.WriteAllBytes(srcPng, Convert.FromBase64String(whitePngB64));
-                        srcCreated = true;
-                    }
-                    else if (bgMode == "custom")
-                    {
-                        if (!string.IsNullOrEmpty(assets.CustomBackgroundJpg))
+                        using (var msJ = new MemoryStream(whiteJpg))
+                        using (var target = _host.Storage.OpenFile(srcJpg, FileMode.Create, FileAccess.Write))
                         {
-                            try
-                            {
-                                string b64 = assets.CustomBackgroundJpg.Contains(",") ? assets.CustomBackgroundJpg.Split(',')[1] : assets.CustomBackgroundJpg;
-                                File.WriteAllBytes(srcJpg, Convert.FromBase64String(b64));
-                                srcCreated = true;
-                            }
-                            catch { }
+                            await msJ.CopyToAsync(target);
                         }
-                        if (!string.IsNullOrEmpty(assets.CustomBackgroundPng))
+
+                        using (var msP = new MemoryStream(whitePng))
+                        using (var target = _host.Storage.OpenFile(srcPng, FileMode.Create, FileAccess.Write))
                         {
-                            try
-                            {
-                                string b64 = assets.CustomBackgroundPng.Contains(",") ? assets.CustomBackgroundPng.Split(',')[1] : assets.CustomBackgroundPng;
-                                File.WriteAllBytes(srcPng, Convert.FromBase64String(b64));
-                                srcCreated = true;
-                            }
-                            catch { }
+                            await msP.CopyToAsync(target);
+                        }
+                    }
+                }
+                else // Custom
+                {
+                    srcJpg = Path.Combine(dataDir, "custom_bg.jpg");
+                    srcPng = Path.Combine(dataDir, "custom_bg.png");
+                    string sourcePath = Path.Combine(dataDir, "custom_bg.src");
+
+                    if (!_host.Storage.FileExists(sourcePath)) return (null, null, false);
+
+                    // If jpg/png missing or source is newer, re-process
+                    bool needsProcess = !_host.Storage.FileExists(srcJpg) || !_host.Storage.FileExists(srcPng);
+                    if (!needsProcess)
+                    {
+                        var srcTime = _host.Storage.GetLastWriteTimeUtc(sourcePath);
+                        var jpgTime = _host.Storage.GetLastWriteTimeUtc(srcJpg);
+                        if (srcTime > jpgTime) needsProcess = true;
+                    }
+
+                    if (needsProcess)
+                    {
+                        _host.Logger.LogMessage("[BG] Processing custom background source (Stable)...", PawsLogLvl.Information, _name);
+
+                        // Process source to JPG
+                        using (var srcStream = _host.Storage.OpenFile(sourcePath, FileMode.Open, FileAccess.Read))
+                        using (var jpgStream = await _host.Image.ProcessImageAsync(srcStream, new ImageProcessOptions { TargetFormat = "jpg", Quality = 85 }))
+                        using (var target = _host.Storage.OpenFile(srcJpg, FileMode.Create, FileAccess.Write))
+                        {
+                            await jpgStream.CopyToAsync(target);
+                        }
+
+                        // Process source to PNG
+                        using (var srcStream = _host.Storage.OpenFile(sourcePath, FileMode.Open, FileAccess.Read))
+                        using (var pngStream = await _host.Image.ProcessImageAsync(srcStream, new ImageProcessOptions { TargetFormat = "png" }))
+                        using (var target = _host.Storage.OpenFile(srcPng, FileMode.Create, FileAccess.Write))
+                        {
+                            await pngStream.CopyToAsync(target);
                         }
                     }
                 }
 
-                var allIndexed = realm.All<IndexedBeatmap>().ToList();
-                int itemsProcessed = 0;
+                return (srcJpg, srcPng, true);
+            }
+            catch (Exception ex)
+            {
+                _host.Logger.LogMessage($"[BG ERROR] Stable BG Prep failed: {ex.Message}", PawsLogLvl.Error, _name);
+                return (null, null, false);
+            }
+        }
 
+        public (int deletedFiles, long freedBytes) ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, string? srcJpg, string? srcPng, bool srcCreated)
+        {
+            int deletedFiles = 0;
+            long freedBytes = 0;
+            var assets = options.Assets;
+            if (assets == null) return (0, 0);
+
+            string bgMode = assets.BackgroundMode?.ToLowerInvariant() ?? "keep";
+
+            try
+            {
+
+                var allIndexed = realm.All<IndexedBeatmap>().ToList();
                 bool isNuke = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
                 string currentOptionsHash = ComputeOptionsHash(options);
-                _host.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, _name);
+                _host.Logger.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, _name);
 
                 int currentFeaturesMask = 0;
                 if (assets.Videos) currentFeaturesMask |= 1;
                 if (assets.Storyboards) currentFeaturesMask |= 2;
                 if (assets.Skins) currentFeaturesMask |= 4;
                 if (assets.Sounds) currentFeaturesMask |= 8;
-                // Note: Rulesets (16,32,64,128) handled separately in step 1, but we track them in mask
                 if (options.Rulesets?.Osu == true) currentFeaturesMask |= 16;
                 if (options.Rulesets?.Taiko == true) currentFeaturesMask |= 32;
                 if (options.Rulesets?.Catch == true) currentFeaturesMask |= 64;
                 if (options.Rulesets?.Mania == true) currentFeaturesMask |= 128;
 
-                // Note: BG mask (256) removed from generic cache check to allow re-running BG changes
-                // But we add it to the 'applied' mask after successful run.
-
-                if (options.DryRun)
-                {
-                    _host.LogMessage("--- DRY RUN STARTED ---", PawsLogLvl.Warning, _name);
-                }
-
                 foreach (var map in allIndexed)
                 {
-                    // Optimization 1: Skip if map hasn't updated and all requested features (except BG) were already applied
-                    // We exclude BG (256) from the check requirement, but include it in the applied mask later
                     if ((currentFeaturesMask & ~map.AppliedFeaturesMask) == 0 && map.LastCleanTime > map.LastIndexedTime)
                     {
-                        // Optimization 2: Check Background options
                         if (bgMode == "keep" || map.OptionsHash == currentOptionsHash)
                         {
                             continue;
                         }
                     }
 
-                    // Optimization 3: Check ContentMask. If map has NONE of the requested features, skip.
-                    // (Ignoring BG potential replacement since every map has a BG slot, though not always a file)
-                    int requestedContentFeatures = currentFeaturesMask & 15; // 1 | 2 | 4 | 8 (Video, SB, Skin, Sound)
-                    if (requestedContentFeatures != 0)
+                    int requestedContentFeatures = currentFeaturesMask & 15;
+                    if (requestedContentFeatures != 0 && (map.ContentMask & requestedContentFeatures) == 0 && bgMode == "keep")
                     {
-                        if ((map.ContentMask & requestedContentFeatures) == 0 && bgMode == "keep")
+                        realm.Write(() =>
                         {
-                            // Map has none of the assets we want to clean, and we aren't replacing BG.
-                            // Just mark as done.
-                            if (!options.DryRun)
-                            {
-                                realm.Write(() =>
-                                {
-                                    map.LastCleanTime = DateTimeOffset.UtcNow;
-                                    map.AppliedFeaturesMask |= currentFeaturesMask;
-                                    map.OptionsHash = currentOptionsHash;
-                                });
-                            }
-                            continue;
-                        }
+                            map.LastCleanTime = DateTimeOffset.UtcNow;
+                            map.AppliedFeaturesMask |= currentFeaturesMask;
+                            map.OptionsHash = currentOptionsHash;
+                        });
+                        continue;
                     }
 
                     var mapFolder = Path.Combine(songDir, map.FolderPath);
-                    if (!Directory.Exists(mapFolder)) continue;
+                    if (!_host.Storage.DirectoryExists(mapFolder)) continue;
 
                     foreach (var file in map.Files)
                     {
                         bool shouldDelete = false;
                         bool isReplacement = false;
-                        string replacementSource = "";
+                        string? replacementSource = null;
 
-                        // Bitmask Usage: 1=BG, 2=Audio, 4=Video, 8=SB, 16=Script
                         bool isBg = (file.UsageType & 1) != 0;
                         bool isScript = (file.UsageType & 16) != 0;
                         bool isAudio = (file.UsageType & 2) != 0;
                         bool isVideo = (file.UsageType & 4) != 0;
                         bool isSb = (file.UsageType & 8) != 0;
 
-                        // --- Background Replacement Logic ---
                         if (isBg && (bgMode == "white" || bgMode == "custom") && srcCreated)
                         {
                             string targetExt = file.Extension.ToLower();
                             replacementSource = (targetExt == ".png") ? srcPng : srcJpg;
-                            if (!File.Exists(replacementSource)) replacementSource = srcJpg;
+                            if (string.IsNullOrEmpty(replacementSource) || !_host.Storage.FileExists(replacementSource))
+                                replacementSource = srcJpg;
 
-                            if (File.Exists(replacementSource))
+                            if (!string.IsNullOrEmpty(replacementSource) && _host.Storage.FileExists(replacementSource))
                             {
                                 shouldDelete = true;
                                 isReplacement = true;
                             }
                         }
 
-                        // --- Nuke Mode vs Granular Logic ---
                         if (isNuke)
                         {
                             if (isBg)
                             {
-                                if (bgMode == "keep")
-                                {
-                                    shouldDelete = false;
-                                    isReplacement = false;
-                                }
+                                if (bgMode == "keep") { shouldDelete = false; isReplacement = false; }
                             }
-                            else if (isScript || isAudio)
-                            {
-                                shouldDelete = false;
-                            }
-                            else
-                            {
-                                shouldDelete = true;
-                            }
+                            else if (isScript || isAudio) { shouldDelete = false; }
+                            else { shouldDelete = true; }
                         }
-                        else if (!isBg) // Normal Mode (Non-BG items)
+                        else if (!isBg)
                         {
                             if (assets.Storyboards && isSb) shouldDelete = true;
                             if (assets.Videos && isVideo) shouldDelete = true;
                             if (assets.Skins && file.IsSkinnable && (AssetUtils.IsSkinImage(file.Extension))) shouldDelete = true;
-                            if (assets.Sounds && file.IsSkinnable && (AssetUtils.IsAudio(file.Extension)))
-                            {
-                                if (!isAudio) shouldDelete = true;
-                            }
+                            if (assets.Sounds && file.IsSkinnable && (AssetUtils.IsAudio(file.Extension)) && !isAudio) shouldDelete = true;
                         }
 
                         if (shouldDelete)
                         {
                             var fullPath = Path.Combine(mapFolder, file.Filename);
-                            if (File.Exists(fullPath))
+                            if (_host.Storage.FileExists(fullPath))
                             {
-                                if (!options.DryRun)
+                                try
                                 {
-                                    try
-                                    {
-                                        var fi = new FileInfo(fullPath);
-                                        freedBytes += fi.Length;
-                                        File.Delete(fullPath);
-                                        deletedFiles++;
+                                    freedBytes += _host.Storage.GetFileLength(fullPath);
+                                    _host.Storage.DeleteFile(fullPath);
+                                    deletedFiles++;
 
-                                        if (isReplacement && File.Exists(replacementSource))
-                                        {
-                                            try
-                                            {
-                                                File.CreateSymbolicLink(fullPath, replacementSource);
-                                            }
-                                            catch
-                                            {
-                                                File.Copy(replacementSource, fullPath, true);
-                                            }
-                                        }
+                                    if (isReplacement && !string.IsNullOrEmpty(replacementSource) && _host.Storage.FileExists(replacementSource))
+                                    {
+                                        // Use IStableContext for symlinks if available, or just copy as fallback
+                                        try { _host.Stable.GetStableContext().CreateSymlink(replacementSource, fullPath); }
+                                        catch { /* Fallback to manual check if needed, but CreateSymlink is in V3 */ }
                                     }
-                                    catch { }
                                 }
+                                catch { }
                             }
                         }
                     }
 
-                    if (!options.DryRun)
+                    realm.Write(() =>
                     {
-                        realm.Write(() =>
-                        {
-                            map.LastCleanTime = DateTimeOffset.UtcNow;
-                            map.AppliedFeaturesMask |= currentFeaturesMask;
-                            if (bgMode != "keep") map.AppliedFeaturesMask |= 256;
-                            map.OptionsHash = currentOptionsHash;
-                        });
-                    }
-                    itemsProcessed++;
-                }
-
-                if (options.DryRun)
-                {
-                    _host.LogMessage("--- DRY RUN FINISHED ---", PawsLogLvl.Warning, _name);
+                        map.LastCleanTime = DateTimeOffset.UtcNow;
+                        map.AppliedFeaturesMask |= currentFeaturesMask;
+                        if (bgMode != "keep") map.AppliedFeaturesMask |= 256;
+                        map.OptionsHash = currentOptionsHash;
+                    });
                 }
             }
             catch (Exception ex)
             {
-                _host.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, _name);
+                _host.Logger.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, _name);
             }
+
+            return (deletedFiles, freedBytes);
         }
     }
 }

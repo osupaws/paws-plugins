@@ -6,6 +6,7 @@ using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Strategies.Lazer;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces;
 using PawsCleaner.Models;
 
 namespace PawsCleaner.Strategies.Lazer.Components
@@ -97,16 +98,13 @@ namespace PawsCleaner.Strategies.Lazer.Components
 
                 if (shouldUnlink)
                 {
-                    if (!options.DryRun)
-                    {
-                        set.Files.RemoveAt(f);
-                        setModified = true;
-                        removals++;
-                    }
+                    set.Files.RemoveAt(f);
+                    setModified = true;
+                    removals++;
                 }
             }
 
-            if (setModified && !options.DryRun)
+            if (setModified)
             {
                 context.UpdateBeatmapSet(set);
                 return 1; // Count as 1 set modified
@@ -120,74 +118,91 @@ namespace PawsCleaner.Strategies.Lazer.Components
             string? importedJpg = null;
             string? importedPng = null;
             bool bgImported = false;
-            string bgMode = options.Assets?.BackgroundMode?.ToLowerInvariant() ?? "keep";
+            var assets = options.Assets;
+            string bgMode = assets?.BackgroundMode?.ToLowerInvariant() ?? "keep";
 
-            if ((bgMode == "white" || bgMode == "custom") && !options.DryRun)
+            if (bgMode == "white" || bgMode == "custom")
             {
-                // (Same BG logic as before)
                 try
                 {
-                    string sourceJpg = "";
-                    string sourcePng = "";
-                    bool tempJpgCreated = false;
-                    bool tempPngCreated = false;
+                    string dataDir = _host.Storage.GetPluginDataPath();
+                    string tempDir = _host.Storage.GetPluginTempPath();
+
+                    string jpgPath;
+                    string pngPath;
 
                     if (bgMode == "white")
                     {
-                        string whiteJpgB64 = "/9j/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/wgALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/aAAgBAQAAAAB/P//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8Af//Z";
-                        string whitePngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAACklEQVR42mNoAAAAggCB2kUIOwAAAABJRU5ErkJggg==";
+                        jpgPath = Path.Combine(dataDir, "white_bg.jpg");
+                        pngPath = Path.Combine(dataDir, "white_bg.png");
 
-                        sourceJpg = Path.Combine(Path.GetTempPath(), "paws_white.jpg");
-                        sourcePng = Path.Combine(Path.GetTempPath(), "paws_white.png");
+                        // Generate white backgrounds ONCE if they don't exist in Data
+                        if (!_host.Storage.FileExists(jpgPath) || !_host.Storage.FileExists(pngPath))
+                        {
+                            _host.Logger.LogMessage("[BG] Generating persistent white backgrounds...", PawsLogLvl.Information, _name);
+                            // We use a 1x1 white pixel stream for efficiency
+                            byte[] whiteJpg = { 0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x05, 0x03, 0x03, 0x03, 0x03, 0x03, 0x06, 0x04, 0x04, 0x03, 0x05, 0x07, 0x06, 0x07, 0x07, 0x07, 0x06, 0x07, 0x07, 0x08, 0x09, 0x0B, 0x09, 0x08, 0x08, 0x0A, 0x08, 0x07, 0x07, 0x0A, 0x0D, 0x0A, 0x0A, 0x0B, 0x0C, 0x0C, 0x0C, 0x0C, 0x07, 0x09, 0x0E, 0x0F, 0x0D, 0x0C, 0x0E, 0x0B, 0x0C, 0x0C, 0x0C, 0xFF, 0xC2, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x7F, 0x3F, 0xFF, 0xC4, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x01, 0x3F, 0x00, 0x7F, 0xFF, 0xD9 };
+                            byte[] whitePng = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x37, 0x6E, 0xF9, 0x24, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x68, 0x00, 0x00, 0x00, 0x82, 0x00, 0x81, 0xDA, 0x45, 0x08, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82 };
 
-                        await File.WriteAllBytesAsync(sourceJpg, Convert.FromBase64String(whiteJpgB64));
-                        await File.WriteAllBytesAsync(sourcePng, Convert.FromBase64String(whitePngB64));
-                        tempJpgCreated = true;
-                        tempPngCreated = true;
-                    }
-                    else if (bgMode == "custom" && options.Assets != null)
-                    {
-                        if (!string.IsNullOrEmpty(options.Assets.CustomBackgroundJpg))
-                        {
-                            try
+                            using (var msJ = new MemoryStream(whiteJpg))
+                            using (var target = _host.Storage.OpenFile(jpgPath, FileMode.Create, FileAccess.Write))
                             {
-                                string b64 = options.Assets.CustomBackgroundJpg.Contains(",") ? options.Assets.CustomBackgroundJpg.Split(',')[1] : options.Assets.CustomBackgroundJpg;
-                                sourceJpg = Path.Combine(Path.GetTempPath(), "paws_custom.jpg");
-                                await File.WriteAllBytesAsync(sourceJpg, Convert.FromBase64String(b64));
-                                tempJpgCreated = true;
+                                await msJ.CopyToAsync(target);
                             }
-                            catch { }
-                        }
-                        if (!string.IsNullOrEmpty(options.Assets.CustomBackgroundPng))
-                        {
-                            try
+
+                            using (var msP = new MemoryStream(whitePng))
+                            using (var target = _host.Storage.OpenFile(pngPath, FileMode.Create, FileAccess.Write))
                             {
-                                string b64 = options.Assets.CustomBackgroundPng.Contains(",") ? options.Assets.CustomBackgroundPng.Split(',')[1] : options.Assets.CustomBackgroundPng;
-                                sourcePng = Path.Combine(Path.GetTempPath(), "paws_custom.png");
-                                await File.WriteAllBytesAsync(sourcePng, Convert.FromBase64String(b64));
-                                tempPngCreated = true;
+                                await msP.CopyToAsync(target);
                             }
-                            catch { }
                         }
                     }
-
-                    if (!string.IsNullOrEmpty(sourceJpg) && File.Exists(sourceJpg))
+                    else // Custom
                     {
-                        importedJpg = await context.ImportFile(sourceJpg, Path.GetFileName(sourceJpg));
-                        if (tempJpgCreated) File.Delete(sourceJpg);
-                    }
-                    if (!string.IsNullOrEmpty(sourcePng) && File.Exists(sourcePng))
-                    {
-                        importedPng = await context.ImportFile(sourcePng, Path.GetFileName(sourcePng));
-                        if (tempPngCreated) File.Delete(sourcePng);
+                        jpgPath = Path.Combine(dataDir, "custom_bg.jpg");
+                        pngPath = Path.Combine(dataDir, "custom_bg.png");
+                        string sourcePath = Path.Combine(dataDir, "custom_bg.src");
+
+                        if (!_host.Storage.FileExists(sourcePath)) return (null, null, false);
+
+                        // If jpg/png missing or source is newer, re-process
+                        bool needsProcess = !_host.Storage.FileExists(jpgPath) || !_host.Storage.FileExists(pngPath);
+                        if (!needsProcess)
+                        {
+                            var srcTime = _host.Storage.GetLastWriteTimeUtc(sourcePath);
+                            var jpgTime = _host.Storage.GetLastWriteTimeUtc(jpgPath);
+                            if (srcTime > jpgTime) needsProcess = true;
+                        }
+
+                        if (needsProcess)
+                        {
+                            _host.Logger.LogMessage("[BG] Processing custom background source...", PawsLogLvl.Information, _name);
+
+                            // Process source to JPG
+                            using (var srcStream = _host.Storage.OpenFile(sourcePath, FileMode.Open, FileAccess.Read))
+                            using (var jpgStream = await _host.Image.ProcessImageAsync(srcStream, new ImageProcessOptions { TargetFormat = "jpg", Quality = 85 }))
+                            using (var target = _host.Storage.OpenFile(jpgPath, FileMode.Create, FileAccess.Write))
+                            {
+                                await jpgStream.CopyToAsync(target);
+                            }
+
+                            // Process source to PNG
+                            using (var srcStream = _host.Storage.OpenFile(sourcePath, FileMode.Open, FileAccess.Read))
+                            using (var pngStream = await _host.Image.ProcessImageAsync(srcStream, new ImageProcessOptions { TargetFormat = "png" }))
+                            using (var target = _host.Storage.OpenFile(pngPath, FileMode.Create, FileAccess.Write))
+                            {
+                                await pngStream.CopyToAsync(target);
+                            }
+                        }
                     }
 
-                    if (importedJpg != null || importedPng != null)
-                        bgImported = true;
+                    importedJpg = await context.ImportFile(jpgPath, "background.jpg");
+                    importedPng = await context.ImportFile(pngPath, "background.png");
+                    bgImported = true;
                 }
                 catch (Exception ex)
                 {
-                    _host.LogMessage($"[BG ERROR] BG Prep failed: {ex.Message}", PawsLogLvl.Error, _name);
+                    _host.Logger.LogMessage($"[BG ERROR] BG Prep failed: {ex.Message}", PawsLogLvl.Error, _name);
                 }
             }
             return (importedJpg, importedPng, bgImported);

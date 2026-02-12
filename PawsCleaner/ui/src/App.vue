@@ -8,6 +8,8 @@ import {
   PawsDropdown,
   PawsButton,
   PawsProgressbar,
+  PawsSubButton,
+  ResetImageIcon,
 } from "@osupaws/paws-ui";
 
 const rulesets = ref({
@@ -30,31 +32,90 @@ const isLoading = ref(false);
 const progress = ref(0);
 
 const backgroundOptions = ["keep", "white", "custom"];
-const customBgPng = ref<string | null>(null);
-const customBgJpg = ref<string | null>(null);
-const customBgPngName = ref<string | null>(null);
-const customBgJpgName = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
 
-function handleFileSelect(event: Event, type: "png" | "jpg") {
-  const input = event.target as HTMLInputElement;
-  if (!input.files || input.files.length === 0) return;
-  const file = input.files[0];
-  const reader = new FileReader();
-
-  reader.onload = (e) => {
-    const base64 = e.target?.result as string;
-    // Strip prefix like "data:image/png;base64," if needed
-    // But sending full data URI is safer for backend to parse MIME if needed
-    // We'll send full string.
-    if (type === "png") {
-      customBgPng.value = base64;
-      customBgPngName.value = file.name;
-    } else {
-      customBgJpg.value = base64;
-      customBgJpgName.value = file.name;
+async function onBackgroundChange(val: string) {
+  if (val === "custom") {
+    try {
+      const result = (await Paws.sendCommand("checkCustomBackground")) as any;
+      const exists = result?.Exists ?? result?.exists;
+      if (!exists) {
+        fileInput.value?.click();
+      }
+    } catch (err) {
+      console.error("Failed to check background", err);
+      fileInput.value?.click();
     }
-  };
-  reader.readAsDataURL(file);
+  }
+}
+
+async function handleFileCancel() {
+  // Revert to keep if no background is actually saved
+  try {
+    const result = (await Paws.sendCommand("checkCustomBackground")) as any;
+    const exists = result?.Exists ?? result?.exists;
+    if (!exists && assets.value.background === "custom") {
+      assets.value.background = "keep";
+    }
+  } catch {
+    assets.value.background = "keep";
+  }
+}
+
+async function handleFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) {
+    await handleFileCancel();
+    return;
+  }
+
+  const file = input.files[0];
+  try {
+    isLoading.value = true;
+
+    // 1. Native Bridge Upload (Bypasses CORS, avoids Base64)
+    let tempHandle: string;
+
+    // Use fast path if available (direct file path access)
+    if ((file as any).path) {
+      const result = await (window as any).api.storage.uploadTempPath(
+        (file as any).path,
+      );
+      tempHandle = result.tempHandle || result.TempHandle;
+    } else {
+      // Fallback for non-local files or restrictive environments
+      const buffer = await file.arrayBuffer();
+      const result = await (window as any).api.storage.uploadTemp(buffer);
+      tempHandle = result.tempHandle || result.TempHandle;
+    }
+
+    console.log("File handled via native bridge, handle:", tempHandle);
+
+    if (!tempHandle) {
+      throw new Error("Failed to get TempHandle from native bridge");
+    }
+
+    // 2. Tell the plugin to process this temp file (Plugin will resize it to 1080p)
+    const result = (await Paws.sendCommand("importCustomBackgroundTemp", {
+      tempHandle: tempHandle,
+    })) as any;
+
+    const success = result?.Success ?? result?.success;
+    const message = result?.Message ?? result?.message;
+
+    if (success) {
+      console.log("Custom background imported via Native Bridge.");
+    } else {
+      console.error("Plugin import failed", message);
+      assets.value.background = "keep";
+    }
+  } catch (err) {
+    console.error("Upload error", err);
+    assets.value.background = "keep";
+  } finally {
+    isLoading.value = false;
+    if (input) input.value = "";
+  }
 }
 
 async function startCleaning() {
@@ -63,7 +124,6 @@ async function startCleaning() {
   progress.value = 0;
 
   const payload = {
-    // Mode is now handled by Backend using IsLegacyMode check
     DryRun: dryRun.value,
     Rulesets: {
       Osu: rulesets.value.osu,
@@ -76,9 +136,7 @@ async function startCleaning() {
       Sounds: assets.value.sounds,
       Videos: assets.value.videos,
       Storyboards: assets.value.storyboards,
-      BackgroundMode: assets.value.background, // "keep", "white", "custom"
-      CustomBackgroundPng: customBgPng.value,
-      CustomBackgroundJpg: customBgJpg.value,
+      BackgroundMode: assets.value.background,
     },
   };
 
@@ -115,56 +173,45 @@ async function startCleaning() {
       </template>
 
       <div class="assets-container">
-        <!-- Row 1: skins, sounds, background dropdown -->
         <div class="checkbox-group">
           <PawsCheckbox label="skins" v-model="assets.skins" />
           <PawsCheckbox label="sounds" v-model="assets.sounds" />
-          <div style="width: 200px">
+          <PawsCheckbox label="videos" v-model="assets.videos" />
+        </div>
+
+        <div class="checkbox-group">
+          <PawsCheckbox label="storyboards" v-model="assets.storyboards" />
+          <div class="bg-selection-wrapper">
             <PawsDropdown
               label="bgs"
               :options="backgroundOptions"
               v-model="assets.background"
               size="compact"
               defaultValue="keep"
+              @update:modelValue="onBackgroundChange"
             />
+            <PawsSubButton
+              v-if="assets.background === 'custom'"
+              size="medium"
+              @click="fileInput?.click()"
+            >
+              <template #icon>
+                <ResetImageIcon />
+              </template>
+            </PawsSubButton>
           </div>
-        </div>
-
-        <!-- Custom Background Files -->
-        <div
-          v-if="assets.background === 'custom'"
-          class="custom-files-container"
-        >
-          <div class="file-row">
-            <span class="file-label">PNG:</span>
-            <input
-              type="file"
-              accept=".png"
-              @change="(e) => handleFileSelect(e, 'png')"
-            />
-            <span v-if="customBgPngName" class="file-name">{{
-              customBgPngName
-            }}</span>
-          </div>
-          <div class="file-row">
-            <span class="file-label">JPG:</span>
-            <input
-              type="file"
-              accept=".jpg,.jpeg"
-              @change="(e) => handleFileSelect(e, 'jpg')"
-            />
-            <span v-if="customBgJpgName" class="file-name">{{
-              customBgJpgName
-            }}</span>
-          </div>
-        </div>
-
-        <!-- Row 2: videos, storyboards, previews -->
-        <div class="checkbox-group">
-          <PawsCheckbox label="videos" v-model="assets.videos" />
-          <PawsCheckbox label="storyboards" v-model="assets.storyboards" />
         </div>
       </div>
+
+      <!-- Hidden File Input for Custom BG -->
+      <input
+        type="file"
+        ref="fileInput"
+        style="display: none"
+        accept="image/*"
+        @change="handleFileSelect"
+        @cancel="handleFileCancel"
+      />
     </PawsCard>
 
     <div class="split-row">
@@ -246,6 +293,16 @@ async function startCleaning() {
   gap: 16px;
   width: 100%;
   flex-shrink: 0;
+}
+
+.bg-selection-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 200px; /* Base width remains for the group */
+}
+.bg-selection-wrapper > :first-child {
+  flex: 1; /* Dropdown takes main space */
 }
 
 .cleaner-card-half {
