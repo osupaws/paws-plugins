@@ -11,7 +11,7 @@ using System.Text.Json;
 
 namespace PawsCleaner
 {
-    public class PawsCleanerPlugin : IPawsPlugin
+    public class PawsCleanerPlugin : IPawsPlugin, ISupportsLifecycle
     {
         public string Id => "osupaws.cleaner";
         public string Name => "Paws Cleaner";
@@ -26,6 +26,17 @@ namespace PawsCleaner
             _host = host;
             _host.Logger.LogMessage($"{Name} initialized (V3 Architecture)!", PawsLogLvl.Information, Name);
             return Task.CompletedTask;
+        }
+
+
+        public async Task OnUiWakeAsync()
+        {
+            _host?.Logger.LogMessage($"{Name} Wake Up!", PawsLogLvl.Information, Name);
+        }
+
+        public async Task OnUiSleepAsync()
+        {
+            _host?.Logger.LogMessage($"{Name} Sleeping...", PawsLogLvl.Information, Name);
         }
 
         public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)

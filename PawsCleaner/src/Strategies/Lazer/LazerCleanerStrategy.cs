@@ -56,6 +56,7 @@ namespace PawsCleaner.Strategies.Lazer
                 };
 
 
+
                 string currentOptionsHash = CachedLazerSet.ComputeOptionsHash(options);
                 int currentFeaturesMask = CachedLazerSet.ComputeFeaturesMask(options);
                 int skippedByCache = 0;

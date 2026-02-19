@@ -78,10 +78,27 @@ foreach (var set in sets)
 
 ### identifying Assets
 
-Files in osu!lazer are hashed. To find which file is the background or audio, use `Metadata`.
+### identifying Assets
+
+Files in osu!lazer are hashed and stored in the `files/` directory.
+
+To resolve a filename (like "bg.jpg") to a physical path:
+
+1.  Get the content hash from the `Metadata` or `Files` list.
+2.  Use `context.GetFilePath(hash)`.
 
 ```csharp
-var backgroundFile = map.Metadata?.BackgroundFile;
+var backgroundFilename = map.Metadata?.BackgroundFile;
+var fileUsage = set.Files.FirstOrDefault(f => f.Filename == backgroundFilename);
+
+if (fileUsage != null)
+{
+    // Get absolute physical path on disk
+    string physicalPath = context.GetFilePath(fileUsage.File.Hash);
+
+    // Now you can open 'physicalPath' using _host.Storage.OpenFile()
+    // IF you have permission (filesystem-osu).
+}
 ```
 
 ## 4. Persisting Changes
@@ -97,3 +114,14 @@ context.UpdateBeatmapSet(set);
 ```
 
 This ensures the database remains in sync with the file system.
+
+## 5. File Operations
+
+The `ILazerContext` provides methods to manage physical files:
+
+- **Import File**: `await context.ImportFile("C:/plugin/data/image.jpg", "image.jpg");`
+  - Returns the hash of the imported file.
+- **Delete Files**: `context.DeleteFiles(listOfHashes);`
+  - Removes the physical files from the `files/` directory.
+- **Orphan Cleanup**: `context.GetSafeOrphanHashes();`
+  - Returns a list of hashes that are not referenced by ANY beatmap, skin, or score.

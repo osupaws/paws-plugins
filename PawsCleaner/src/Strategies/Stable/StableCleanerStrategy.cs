@@ -49,13 +49,14 @@ namespace PawsCleaner.Strategies.Stable
             {
                 var stable = _host.Stable.GetStableContext();
                 var dbPath = Path.Combine(stablePath, "osu!.db");
+                string pluginData = _host.Storage.GetPluginDataPath();
                 string songDir = "";
                 try { songDir = stable.GetSongsPath(); }
                 catch { songDir = Path.Combine(stablePath, "Songs"); } // Fallback
 
                 _host.Logger.LogMessage($"[CONFIG] Mode: {options.Mode}", PawsLogLvl.Information, Name);
                 _host.Logger.LogMessage($"[CONFIG] Delete Rulesets? Osu: {options.Rulesets?.Osu ?? false}, Taiko: {options.Rulesets?.Taiko ?? false}, Catch: {options.Rulesets?.Catch ?? false}, Mania: {options.Rulesets?.Mania ?? false}", PawsLogLvl.Information, Name);
-                _host.Logger.LogMessage("Reading osu!.db...", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"Reading {dbPath}...", PawsLogLvl.Information, Name);
 
                 var db = stable.ReadOsuDatabase(dbPath);
 

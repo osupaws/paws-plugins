@@ -9,5 +9,8 @@
   "entryPoint": "MyPlugin.dll",
   "ui": {
     "entry": "ui/index.html"
-  }
+  },
+  "permissions": [
+    "filesystem-osu"
+  ]
 }

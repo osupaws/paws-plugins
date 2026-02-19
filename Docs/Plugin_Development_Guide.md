@@ -66,6 +66,15 @@ public class MyPlugin : IPawsPlugin
         _host = host;
     }
 
+    // IHost Definition:
+    // interface IHost {
+    //    ILogger Logger { get; }
+    //    ILazerService Lazer { get; }
+    //    IStableService Stable { get; }
+    //    IStorageService Storage { get; }
+    //    bool IsLegacyMode { get; }
+    // }
+
     public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)
     {
         var options = JsonSerializer.Deserialize<MyOptions>(...);
@@ -144,6 +153,51 @@ Our project templates enable **ImplicitUsings**. You do **not** need to explicit
 
 Keep your code clean by removing these redundant directives.
 
+### 🚫 Forbidden Namespaces & IStorageService
+
+Paws enforces a strict security sandbox. **Direct access to `System.IO` is blocked.** You must use `_host.Storage` for all file operations.
+
+**Blocked:**
+
+- `System.IO.File`, `System.IO.Directory`, `System.IO.Path` (partial)
+
+**Allowed Replacement (`IStorageService`):**
+
+- `_host.Storage.FileExists(path)`
+- `_host.Storage.DirectoryExists(path)`
+- `_host.Storage.GetFiles(path, pattern, option)`
+- `_host.Storage.OpenFile(path, mode, access)` -> Returns `Stream`
+- `_host.Storage.GetPluginDataPath()` -> Your private data folder.
+
+**Temp Storage Bridge (zero-copy):**
+
+- `Stream OpenTempStream(string handle)`: Read a temp file uploaded by UI.
+- `void MoveTempToData(string handle, string targetPath)`: Move temp file to persistent storage efficiently.
+
+### Image Processing (IImageProcessor)
+
+Plugins have access to **Magick.NET** via `_host.Image`. This allows for high-performance image resizing and format conversion without adding external dependencies.
+
+```csharp
+using (var sourceStream = _host.Storage.OpenFile(path, FileMode.Open, FileAccess.Read))
+{
+    // Resize/Convert
+    var options = new ImageProcessOptions
+    {
+        TargetFormat = "jpg",
+        Quality = 85,
+        // (Optional) Resize
+        // ResizeWidth = 1920
+    };
+
+    using (var resultStream = await _host.Image.ProcessImageAsync(sourceStream, options))
+    using (var dest = _host.Storage.OpenFile(destPath, FileMode.Create, FileAccess.Write))
+    {
+        await resultStream.CopyToAsync(dest);
+    }
+}
+```
+
 ### Dynamic Core Access
 
 The Paws Core API is evolving. While strict interfaces (`IHost`, `ILazerContext`) are preferred, you can use `dynamic` casting to access new features not yet exposed in the interface.
@@ -183,6 +237,16 @@ Adding a new plugin to the workspace?
   "entryPoint": "MyPlugin.dll",
   "ui": {
     "entry": "ui/index.html"
-  }
+  },
+  "permissions": [
+    "filesystem-osu" // basic access to osu! folders
+  ]
 }
 ```
+
+### Valid Permissions
+
+- **(empty)**: Sandboxed to plugin's own Data/Temp folders.
+- **`filesystem-osu`**: Read/Write access to the user's osu! (Lazer/Stable) storage.
+- **`filesystem-ext`**: Full system access (Requires user audit).
+- **`unsafe-access`**: Bypasses security scanner. **Security Risk**. Plugin will likely be flagged.

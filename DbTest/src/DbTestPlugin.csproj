@@ -7,6 +7,7 @@
 
     <PawsPluginName>DbTestPlugin</PawsPluginName>
     <PawsPluginPackageDir>$(ProjectDir)..\dist\$(PawsPluginName)\</PawsPluginPackageDir>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>

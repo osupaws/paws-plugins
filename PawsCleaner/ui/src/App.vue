@@ -11,6 +11,7 @@ import {
   PawsSubButton,
   ResetImageIcon,
 } from "@osupaws/paws-ui";
+import { nextTick, watch, onMounted } from "vue";
 
 const rulesets = ref({
   osu: true,
@@ -27,12 +28,61 @@ const assets = ref({
   background: "keep",
 });
 
-const dryRun = ref(true);
 const isLoading = ref(false);
 const progress = ref(0);
+const workerLogs = ref<
+  { id: number; message: string; timestamp: string; category: string }[]
+>([]);
 
 const backgroundOptions = ["keep", "white", "custom"];
 const fileInput = ref<HTMLInputElement | null>(null);
+
+function addLog(message: string, category: string = "info") {
+  workerLogs.value.push({
+    id: Date.now() + Math.random(),
+    message,
+    category,
+    timestamp: new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+  });
+}
+
+onMounted(async () => {
+  // Check custom background status on load
+  try {
+    const result = (await Paws.sendCommand("checkCustomBackground")) as any;
+    if (result?.Exists || result?.exists) {
+      addLog("Cached custom background found.", "good");
+    } else {
+      addLog("No custom background in cache.", "info");
+    }
+  } catch (e) {
+    addLog("Failed to check background cache.", "warning");
+  }
+
+  // Lifecycle Listeners (V3)
+  (window as any).Paws?.on("lifecycle", (event: string) => {
+    if (event === "focus") {
+      console.log("[UI] Focused - Resuming animations");
+      // If we had heavy animations, we'd resume them here
+    } else if (event === "blur") {
+      console.log("[UI] Blurred - Pausing animations");
+      // If we had heavy animations, we'd pause them here
+    }
+  });
+});
+
+watch(
+  () => workerLogs.value.length,
+  async () => {
+    // CSS column-reverse handles anchoring automatically,
+    // but we can still ensure visibility if needed for specific cases.
+    await nextTick();
+  },
+);
 
 async function onBackgroundChange(val: string) {
   if (val === "custom") {
@@ -105,8 +155,10 @@ async function handleFileSelect(event: Event) {
 
     if (success) {
       console.log("Custom background imported via Native Bridge.");
+      addLog("Custom background imported successfully.", "good");
     } else {
       console.error("Plugin import failed", message);
+      addLog(`Background import failed: ${message}`, "fail");
       assets.value.background = "keep";
     }
   } catch (err) {
@@ -123,8 +175,24 @@ async function startCleaning() {
   isLoading.value = true;
   progress.value = 0;
 
+  // Add a visual separator for the new run
+  addLog("--- New Cleanup Run Started ---", "scan");
+  addLog("Cleaning engine initialized.", "info");
+
+  const rulesetList = Object.entries(rulesets.value)
+    .filter(([_, v]) => v)
+    .map(([k, _]) => k)
+    .join(", ");
+  addLog(`Rulesets: ${rulesetList || "none"}`, "info");
+
+  const assetList = Object.entries(assets.value)
+    .filter(([k, v]) => v && k !== "background")
+    .map(([k, _]) => k)
+    .join(", ");
+  addLog(`Assets: ${assetList || "none"}`, "info");
+  addLog(`Background mode: ${assets.value.background}`, "info");
+
   const payload = {
-    DryRun: dryRun.value,
     Rulesets: {
       Osu: rulesets.value.osu,
       Taiko: rulesets.value.taiko,
@@ -141,12 +209,21 @@ async function startCleaning() {
   };
 
   try {
-    const result = await Paws.sendCommand("clean", payload);
+    addLog("Analyzing beatmap database...", "info");
+    const result = (await Paws.sendCommand("clean", payload)) as any;
     console.log("Cleanup Result:", result);
-    // Simulate progress for now as we don't have real-time events hooked up yet in backend fully
+
+    if (result?.Message) {
+      // Backend usually returns a summary like "Cleanup Complete. Processed X sets. Deleted Y maps. (stats)"
+      addLog(result.Message, "good");
+    }
+
+    addLog("Finalizing assets changes...", "info");
     progress.value = 100;
-  } catch (e) {
+    addLog("Cleanup finished successfully.", "good");
+  } catch (e: any) {
     console.error("Cleanup Error:", e);
+    addLog(`Error: ${e.message || "Unknown error"}`, "fail");
   } finally {
     isLoading.value = false;
   }
@@ -214,31 +291,40 @@ async function startCleaning() {
       />
     </PawsCard>
 
-    <div class="split-row">
-      <PawsCard class="cleaner-card-half">
-        <template #heading>
-          <PawsHeading size="lg">options</PawsHeading>
-        </template>
-        <div
-          style="padding: 16px; display: flex; flex-direction: column; gap: 8px"
-        >
-          <PawsCheckbox label="Dry Run (Simulate)" v-model="dryRun" />
-          <p style="font-size: 12px; opacity: 0.7">
-            Check console (Ctrl+Shift-I) for logs.
-          </p>
+    <PawsCard class="worker-card">
+      <template #heading>
+        <PawsHeading size="lg">worker</PawsHeading>
+      </template>
+
+      <PawsCard variant="compact" class="inner-card">
+        <div class="log-scroll-area">
+          <template v-if="workerLogs.length === 0">
+            <div class="empty-logs">Worker is idle.</div>
+          </template>
+          <template v-else>
+            <TransitionGroup name="log-list" tag="div" class="log-list-wrapper">
+              <div
+                v-for="log in workerLogs"
+                :key="log.id"
+                class="log-entry"
+                :class="`log-${log.category}`"
+              >
+                <div class="log-header">
+                  <span class="log-time">{{ log.timestamp }}</span>
+                  <span class="log-category"
+                    >[{{ log.category.toUpperCase() }}]</span
+                  >
+                </div>
+                <div class="log-message">{{ log.message }}</div>
+              </div>
+            </TransitionGroup>
+          </template>
         </div>
       </PawsCard>
-
-      <PawsCard class="cleaner-card-half">
-        <template #heading>
-          <PawsHeading size="lg">filter rules</PawsHeading>
-        </template>
-        <p>TBD</p>
-      </PawsCard>
-    </div>
+    </PawsCard>
 
     <PawsButton
-      :label="dryRun ? 'simulate cleanup' : 'clean it up!'"
+      label="clean it up!"
       class="action-button"
       variant="primary"
       @click="startCleaning"
@@ -305,11 +391,148 @@ async function startCleaning() {
   flex: 1; /* Dropdown takes main space */
 }
 
-.cleaner-card-half {
-  flex: 1;
+.worker-card {
+  width: 100%;
   box-sizing: border-box;
-  min-width: 0;
+  flex-shrink: 0;
   height: 292px;
+  display: flex;
+  flex-direction: column;
+}
+
+.worker-card :deep([data-paws-part="content"]) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 12px !important;
+}
+
+.inner-card {
+  flex: 1;
+  background-color: var(--paws-color-bg-primary) !important;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Ensure PawsCard internal content filler allows scrolling */
+.inner-card :deep([data-paws-part="content"]) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0; /* Remove default padding to handle it in log-scroll-area */
+  min-height: 0;
+}
+
+.log-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column-reverse; /* The Magic Anchor */
+}
+
+.log-list-wrapper {
+  display: flex;
+  flex-direction: column; /* Normal order within the anchored block */
+  gap: 2px;
+  padding: 0;
+  width: 100%;
+}
+
+/* Animations */
+.log-list-enter-active,
+.log-list-move {
+  transition: all 0.2s ease;
+}
+
+.log-list-enter-from {
+  opacity: 0;
+  transform: translateY(10px); /* Slide in from bottom */
+}
+
+/* Ensure moving items don't jitter */
+.log-list-leave-active {
+  position: absolute;
+}
+
+.empty-logs {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  font-size: 14px;
+  font-family: var(--paws-font-mono);
+}
+
+.log-entry {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center; /* Fixed vertical alignment */
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-family: var(--paws-font-mono);
+  box-sizing: border-box;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.log-time {
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: var(--paws-font-weight-medium);
+}
+
+.log-category {
+  font-weight: var(--paws-font-weight-medium);
+  font-size: 12px;
+  min-width: 50px; /* Ensure labels align horizontally */
+}
+
+.log-message {
+  font-size: 12px;
+  font-weight: var(--paws-font-weight-normal);
+  line-height: 1.4;
+  color: var(--paws-color-text-primary);
+  word-break: break-word; /* Better than break-all for readability */
+  flex: 1;
+}
+
+/* Category Highlights */
+.log-good .log-category {
+  color: #4ade80;
+}
+.log-fail .log-category,
+.log-fail .log-message {
+  color: #f87171;
+}
+.log-warning .log-category {
+  color: #fbbf24;
+}
+.log-scan .log-category {
+  color: #60a5fa;
+  opacity: 0.8;
+}
+.log-scan {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .action-button {
