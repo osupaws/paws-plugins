@@ -123,5 +123,10 @@ The `ILazerContext` provides methods to manage physical files:
   - Returns the hash of the imported file.
 - **Delete Files**: `context.DeleteFiles(listOfHashes);`
   - Removes the physical files from the `files/` directory.
-- **Orphan Cleanup**: `context.GetSafeOrphanHashes();`
-  - Returns a list of hashes that are not referenced by ANY beatmap, skin, or score.
+
+### Orphan Cleanup Warning
+
+**CRITICAL WARNING:** Do **NOT** use `context.GetSafeOrphanHashes()` or manually orchestrate orphan file deletion in your plugins.
+The current Paws Core implementation of `GetSafeOrphanHashes` is fundamentally flawed: it only checks `BeatmapSet` references and completely ignores references held by `SkinInfo` and `ScoreInfo`. Calling this and deleting the returned "orphans" will wipe out mandatory game assets (like default skins) and crash the game on startup.
+
+**Best Practice:** Rely entirely on `osu!lazer`'s native garbage collection. Lazer performs complete and safe orphan cleanup automatically upon startup. When you want to remove an asset from a map, just remove its hash from `BeatmapSet.Files` and update the set. Let the game engine handle the physical file deletion.

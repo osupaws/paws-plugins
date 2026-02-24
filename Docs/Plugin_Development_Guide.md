@@ -14,6 +14,55 @@ A Paws plugin consists of two main parts packaged together:
 - **Backend**: Loaded into a custom `AssemblyLoadContext` for deep isolation.
 - **Frontend**: Hosted in a sandboxed `<iframe>` within the main Paws application.
 
+### Zero-Boilerplate UI Integration (Vue 3)
+
+The `@osupaws/paws-ui` library provides essential components to bridge your Vue 3 frontend with the Paws Core seamlessly.
+
+**1. `PawsPluginShell` (Required Root Component)**
+Every plugin's `App.vue` **must** be wrapped in a `<PawsPluginShell>`. This structural boundary handles:
+
+- **Automatic Initialization**: Sends the `paws:client-ready` IPC signal upon mounting, automatically dismissing the Paws loading screen.
+- **Viewport Constraints**: Forces a strict `100vw/100vh` layout with `overflow: hidden`, ensuring the iframe boundaries are respected.
+- **Reactive State (`PawsShellStateKey`)**: Subscribes to global system events (theme changes, window focus/blur, game mode switches) and provides a reactive `shellState` via Vue's `inject`:
+  ```vue
+  <script setup lang="ts">
+  import { PawsPluginShell, PawsShellStateKey } from "@osupaws/paws-ui";
+  import { inject } from "vue";
+  // Reactive object: { theme: 'dark'|'light', mode: 'lazer'|'stable', isFocused: boolean }
+  const shellState = inject(PawsShellStateKey);
+  </script>
+  <template>
+    <PawsPluginShell> <!-- Your content here --> </PawsPluginShell>
+  </template>
+  ```
+  _Note: Padding or layouts inside the shell should be handled by your own container elements (`<div>`), as the Shell is a pure structural boundary._
+
+> [!WARNING]
+> **Do not rely on `shellState.mode` for critical business logic.** The IPC `mode-changed` event suffers from race conditions and might leave `shellState.mode` as `"unknown"`. Delegate mode checks (Lazer vs. Stable ruleset filtering) and decisions completely to the C# Backend using `_host.IsLegacyMode`.
+
+**2. `PawsModal` (Recommended Overlays)**
+When building settings panels or popups within your plugin, use the `<PawsModal>` component native to `paws-ui`.
+
+- **Auto-Dismissal**: When the user opens the global Paws App menu or clicks outside the plugin bounds, the core broadcasts a `CustomEvent("paws:close-modals")`. `PawsModal` listens to this and automatically fires its `@close` event, allowing your Vue state to stay synchronized without writing custom IPC listeners.
+
+**3. `PawsCard` & Scroll Layouts (v0.4.0+)**
+The `<PawsCard>` component controls structural backgrounds. Use the `mode` prop (`empty`, `simple`, or `titled`). If you need a title, you **must** use `mode="titled"` and the `#heading` slot.
+
+> [!IMPORTANT]
+> When using `<PawsCard mode="titled">` holding scrollable content, the inner container `.contentTitled` is **not** a flexbox by default. You **must** add this deep CSS override to your Vue component to restore bounded scrolling inside the card:
+>
+> ```css
+> /* Example targeting a card with class "worker-card" */
+> .worker-card :deep(> div:last-child) {
+>   flex: 1;
+>   display: flex;
+>   flex-direction: column;
+>   min-height: 0;
+> }
+> ```
+>
+> Use `<PawsEdgeGradient>` to add stylish scroll shadows.
+
 ---
 
 ## 2. Standard Project Structure

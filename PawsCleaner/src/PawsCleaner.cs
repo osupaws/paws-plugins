@@ -29,14 +29,16 @@ namespace PawsCleaner
         }
 
 
-        public async Task OnUiWakeAsync()
+        public Task OnUiWakeAsync()
         {
             _host?.Logger.LogMessage($"{Name} Wake Up!", PawsLogLvl.Information, Name);
+            return Task.CompletedTask;
         }
 
-        public async Task OnUiSleepAsync()
+        public Task OnUiSleepAsync()
         {
             _host?.Logger.LogMessage($"{Name} Sleeping...", PawsLogLvl.Information, Name);
+            return Task.CompletedTask;
         }
 
         public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)

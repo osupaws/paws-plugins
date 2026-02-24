@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { Paws } from "./paws-api";
 import {
   PawsPluginShell,
+  PawsShellStateKey,
   PawsCard,
   PawsCheckbox,
   PawsHeading,
@@ -10,10 +11,11 @@ import {
   PawsButton,
   PawsProgressbar,
   PawsSubButton,
-  PawsEdgeGradient,
   ResetImageIcon,
 } from "@osupaws/paws-ui";
-import { nextTick, watch, onMounted } from "vue";
+import { inject, nextTick, watch, onMounted } from "vue";
+
+const shellState = inject(PawsShellStateKey);
 
 const rulesets = ref({
   osu: true,
@@ -163,6 +165,14 @@ async function handleFileSelect(event: Event) {
 
 async function startCleaning() {
   if (isLoading.value) return;
+  const currentMode = shellState?.value?.mode;
+  if (!currentMode || currentMode === "unknown") {
+    addLog(
+      "Cannot start: Core has not determined osu! installation yet.",
+      "warning",
+    );
+    return;
+  }
 
   isLoading.value = true;
   progress.value = 0;
@@ -185,6 +195,7 @@ async function startCleaning() {
   addLog(`Background mode: ${assets.value.background}`, "info");
 
   const payload = {
+    Mode: currentMode === "stable" ? "Stable" : "Lazer",
     Rulesets: {
       Osu: rulesets.value.osu,
       Taiko: rulesets.value.taiko,
@@ -225,7 +236,7 @@ async function startCleaning() {
 <template>
   <PawsPluginShell>
     <div class="plugin-container">
-      <PawsCard mode="titled" class="cleaner-card">
+      <PawsCard class="cleaner-card">
         <template #heading>
           <PawsHeading size="lg">ruleset</PawsHeading>
         </template>
@@ -237,7 +248,7 @@ async function startCleaning() {
         </div>
       </PawsCard>
 
-      <PawsCard mode="titled" class="cleaner-card">
+      <PawsCard class="cleaner-card">
         <template #heading>
           <PawsHeading size="lg">assets</PawsHeading>
         </template>
@@ -284,14 +295,12 @@ async function startCleaning() {
         />
       </PawsCard>
 
-      <PawsCard mode="titled" class="worker-card">
+      <PawsCard class="worker-card">
         <template #heading>
           <PawsHeading size="lg">worker</PawsHeading>
         </template>
 
-        <PawsCard mode="empty" class="inner-card">
-          <PawsEdgeGradient side="both" color="var(--paws-color-bg-primary)" />
-
+        <PawsCard variant="compact" class="inner-card">
           <div class="log-scroll-area">
             <template v-if="workerLogs.length === 0">
               <div class="empty-logs">Worker is idle.</div>
@@ -323,11 +332,15 @@ async function startCleaning() {
       </PawsCard>
 
       <PawsButton
-        label="clean it up!"
+        :label="
+          shellState?.mode === 'unknown'
+            ? 'waiting for core...'
+            : 'clean it up!'
+        "
         class="action-button"
         variant="primary"
         @click="startCleaning"
-        :disabled="isLoading"
+        :disabled="isLoading || shellState?.mode === 'unknown'"
       />
 
       <PawsProgressbar :progress="progress" class="progress-bar" />
@@ -343,6 +356,11 @@ async function startCleaning() {
   gap: 16px;
   width: 100%;
   height: 100%;
+}
+
+/* Deep selector to override child component styles if needed */
+:deep([data-paws-part="content"]) {
+  margin-top: 12px !important;
 }
 
 .cleaner-card {
@@ -394,12 +412,12 @@ async function startCleaning() {
   flex-direction: column;
 }
 
-/* Force the paws-ui .contentTitled wrapper to enable flex-based child filling */
-.worker-card :deep(> div:last-child) {
+.worker-card :deep([data-paws-part="content"]) {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  margin-top: 12px !important;
 }
 
 .inner-card {
@@ -412,7 +430,16 @@ async function startCleaning() {
   margin-top: 0;
   min-height: 0;
   overflow: hidden;
-  position: relative;
+}
+
+/* Ensure PawsCard internal content filler allows scrolling */
+.inner-card :deep([data-paws-part="content"]) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0; /* Remove default padding to handle it in log-scroll-area */
+  min-height: 0;
 }
 
 .log-scroll-area {
@@ -421,7 +448,6 @@ async function startCleaning() {
   height: 100%;
   display: flex;
   flex-direction: column-reverse; /* The Magic Anchor */
-  padding: 0 10px; /* 20px total horizontal, 0 vertical */
 }
 
 .log-list-wrapper {

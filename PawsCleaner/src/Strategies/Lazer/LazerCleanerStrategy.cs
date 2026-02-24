@@ -293,6 +293,7 @@ namespace PawsCleaner.Strategies.Lazer
                     }
 
                     // --- ORPHANS ---
+                    /* WE ARE IGNORING ORPHANS FOR NOW (until we fix safeOrphans search logic). For now we trust lazer's GC.
                     try
                     {
                         List<string> safeOrphans = context.GetSafeOrphanHashes();
@@ -302,6 +303,7 @@ namespace PawsCleaner.Strategies.Lazer
                         }
                     }
                     catch { }
+                    */
 
                     string stats = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
                     string msg = $"Cleanup Complete. Processed {setsProcessed} sets (Skipped {skippedByCache}). Deleted {mapsDeleted} maps. ({stats})";
