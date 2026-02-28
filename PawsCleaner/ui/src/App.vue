@@ -12,6 +12,7 @@ import {
   PawsSubButton,
   PawsEdgeGradient,
   ResetImageIcon,
+  PawsModal,
 } from "@osupaws/paws-ui";
 import { nextTick, watch, onMounted } from "vue";
 
@@ -35,6 +36,8 @@ const progress = ref(0);
 const workerLogs = ref<
   { id: number; message: string; timestamp: string; category: string }[]
 >([]);
+
+const isModalOpen = ref(false);
 
 const backgroundOptions = ["keep", "white", "custom"];
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -241,6 +244,17 @@ async function startCleaning() {
         <template #heading>
           <PawsHeading size="lg">assets</PawsHeading>
         </template>
+        <template #actions>
+          <PawsSubButton
+            text="filters"
+            size="medium"
+            @click="isModalOpen = true"
+          >
+            <template #icon>
+              <ResetImageIcon />
+            </template>
+          </PawsSubButton>
+        </template>
 
         <div class="assets-container">
           <div class="checkbox-group">
@@ -332,6 +346,19 @@ async function startCleaning() {
 
       <PawsProgressbar :progress="progress" class="progress-bar" />
     </div>
+
+    <!-- Assets Settings Modal -->
+    <PawsModal
+      :is-open="isModalOpen"
+      title="asset settings"
+      @close="isModalOpen = false"
+    >
+      <div class="modal-content">
+        <div class="empty-settings">
+          Detailed filters for asset cleaning will be added here soon...
+        </div>
+      </div>
+    </PawsModal>
   </PawsPluginShell>
 </template>
 
@@ -567,5 +594,17 @@ async function startCleaning() {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 150px;
+}
+
+.modal-content {
+  padding: 16px 20px;
+}
+
+.empty-settings {
+  opacity: 0.5;
+  font-size: 14px;
+  font-family: var(--paws-font-mono);
+  text-align: center;
+  padding: 32px 0;
 }
 </style>

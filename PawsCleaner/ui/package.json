@@ -1,7 +1,7 @@
 {
   "name": "paws-cleaner-ui",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@osupaws/paws-ui": "0.4.1",
+    "@osupaws/paws-ui": "0.4.3",
     "vue": "^3.5.13"
   },
   "devDependencies": {
