@@ -7,19 +7,20 @@ This guide explains how plugins interact with the **osu!stable** installation us
 Use the `IHost.GetStableContext()` method. This returns a stateless context object that serves as a factory/gateway for reading stable files.
 
 ```csharp
-// In your strategy:
-var stable = _host.GetStableContext();
-
-// Run within a Safe Write Block (Ensures osu! is closed if needed)
-await _host.PerformStableWriteAsync(stablePath =>
+// 1. Safe Access Wrapper
+// Use this wrapper to ensure file operations are safe (it may close osu! processes if needed).
+await _host.Stable.PerformStableWriteAsync(stablePath =>
 {
+    // stablePath is provided by the wrapper (e.g. "C:/osu!")
+
+    // 2. Factory / Utilities
+    var stable = _host.Stable.GetStableContext();
     var dbPath = Path.Combine(stablePath, "osu!.db");
 
-    // Dynamic access to helper methods if not in Interface yet
-    string songsPath = ((dynamic)stable).GetSongsPath();
-
-    // Read the DB
+    // 3. Read Database
     var db = stable.ReadOsuDatabase(dbPath);
+
+    // ... operations ...
 });
 ```
 
@@ -30,8 +31,8 @@ Paws provides a built-in utility to identify **all files used by a map**.
 ```csharp
 var songPath = Path.Combine(stablePath, "Songs", "12345 My Song");
 
-// Returns HashSet<string> of used assets
-var usedAssets = stable.GetUsedAssets(songPath);
+// Check the interface definition or use standard file scanning if needed.
+// var usedAssets = stable.GetUsedAssets(songPath);
 ```
 
 ## 3. Parsing Individual Files
@@ -49,10 +50,15 @@ Console.WriteLine($"Audio: {mapContent.AudioFilename}");
 
 Parsing `.osu` files is slow. If your plugin scans thousands of maps (like a Cleaner), do **not** do this on every run.
 
-**Best Practice:**
-
-1.  Create a local **Realm** database in your plugin's data folder.
-2.  Store an index of parsed results (`IndexedBeatmap`).
-3.  Only re-parse if the folder's `LastWriteTime` OR the individual `.osu` file's `LastWriteTime` has changed (as modifying a map in the editor updates the file but sometimes not the folder timestamp).
+1.  Use `Realm` for caching parsed results.
+2.  Use `_host.Storage.GetLastWriteTimeUtc()` on both folders and files to detect changes.
 
 See `PawsCleaner` source code for a reference implementation of this Indexing pattern.
+
+## 5. File Operations
+
+To modify files in the Stable directory (`Songs`, `Skins`):
+
+- **Delete**: Use `_host.Storage.DeleteFile(path)`.
+  - **Note**: You must use `Storage`, not `System.IO`.
+- **Symlink**: `stable.CreateSymlink(source, dest)` (if supported by OS/Context).

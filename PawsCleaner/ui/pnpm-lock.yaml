@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@osupaws/paws-ui':
-        specifier: 0.3.7-alpha
-        version: 0.3.7-alpha(vue@3.5.27(typescript@5.7.3))
+        specifier: 0.4.3
+        version: 0.4.3(vue@3.5.27(typescript@5.7.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.27(typescript@5.7.3)
@@ -209,8 +209,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@osupaws/paws-ui@0.3.7-alpha':
-    resolution: {integrity: sha512-BnfonZPYUggyFCYgjeL+STukjL+i0pRkRni6grp3mxcef/+N1vrH/j+DwolBHxjScu2jBO4iRkCkNDAU0y9SSA==, tarball: https://npm.pkg.github.com/download/@osupaws/paws-ui/0.3.7-alpha/af79d3451e027c7ba15c6b40598bfbf271a84e27}
+  '@osupaws/paws-ui@0.4.3':
+    resolution: {integrity: sha512-9tL7WP81Yzqf9dCl3Zg1D14H/ZR5UQhnl3rGzH/LI84xYzLCh7FHRtTG5aJjG2VeICB+dyHWDJ/YnHrCt8tcfw==, tarball: https://npm.pkg.github.com/download/@osupaws/paws-ui/0.4.3/5ad5fff6a4b50f0d7e62694891d6d1946cebe0a9}
     engines: {node: '>=22.17'}
     peerDependencies:
       vue: ^3.5.18
@@ -667,7 +667,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@osupaws/paws-ui@0.3.7-alpha(vue@3.5.27(typescript@5.7.3))':
+  '@osupaws/paws-ui@0.4.3(vue@3.5.27(typescript@5.7.3))':
     dependencies:
       vue: 3.5.27(typescript@5.7.3)
 

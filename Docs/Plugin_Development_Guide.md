@@ -14,6 +14,55 @@ A Paws plugin consists of two main parts packaged together:
 - **Backend**: Loaded into a custom `AssemblyLoadContext` for deep isolation.
 - **Frontend**: Hosted in a sandboxed `<iframe>` within the main Paws application.
 
+### Zero-Boilerplate UI Integration (Vue 3)
+
+The `@osupaws/paws-ui` library provides essential components to bridge your Vue 3 frontend with the Paws Core seamlessly.
+
+**1. `PawsPluginShell` (Required Root Component)**
+Every plugin's `App.vue` **must** be wrapped in a `<PawsPluginShell>`. This structural boundary handles:
+
+- **Automatic Initialization**: Sends the `paws:client-ready` IPC signal upon mounting, automatically dismissing the Paws loading screen.
+- **Viewport Constraints**: Forces a strict `100vw/100vh` layout with `overflow: hidden`, ensuring the iframe boundaries are respected.
+- **Reactive State (`PawsShellStateKey`)**: Subscribes to global system events (theme changes, window focus/blur, game mode switches) and provides a reactive `shellState` via Vue's `inject`:
+  ```vue
+  <script setup lang="ts">
+  import { PawsPluginShell, PawsShellStateKey } from "@osupaws/paws-ui";
+  import { inject } from "vue";
+  // Reactive object: { theme: 'dark'|'light', mode: 'lazer'|'stable', isFocused: boolean }
+  const shellState = inject(PawsShellStateKey);
+  </script>
+  <template>
+    <PawsPluginShell> <!-- Your content here --> </PawsPluginShell>
+  </template>
+  ```
+  _Note: Padding or layouts inside the shell should be handled by your own container elements (`<div>`), as the Shell is a pure structural boundary._
+
+> [!WARNING]
+> **Do not rely on `shellState.mode` for critical business logic.** The IPC `mode-changed` event suffers from race conditions and might leave `shellState.mode` as `"unknown"`. Delegate mode checks (Lazer vs. Stable ruleset filtering) and decisions completely to the C# Backend using `_host.IsLegacyMode`.
+
+**2. `PawsModal` (Recommended Overlays)**
+When building settings panels or popups within your plugin, use the `<PawsModal>` component native to `paws-ui`.
+
+- **Auto-Dismissal**: When the user opens the global Paws App menu or clicks outside the plugin bounds, the core broadcasts a `CustomEvent("paws:close-modals")`. `PawsModal` listens to this and automatically fires its `@close` event, allowing your Vue state to stay synchronized without writing custom IPC listeners.
+
+**3. `PawsCard` & Scroll Layouts (v0.4.0+)**
+The `<PawsCard>` component controls structural backgrounds. Use the `mode` prop (`empty`, `simple`, or `titled`). If you need a title, you **must** use `mode="titled"` and the `#heading` slot.
+
+> [!IMPORTANT]
+> When using `<PawsCard mode="titled">` holding scrollable content, the inner container `.contentTitled` is **not** a flexbox by default. You **must** add this deep CSS override to your Vue component to restore bounded scrolling inside the card:
+>
+> ```css
+> /* Example targeting a card with class "worker-card" */
+> .worker-card :deep(> div:last-child) {
+>   flex: 1;
+>   display: flex;
+>   flex-direction: column;
+>   min-height: 0;
+> }
+> ```
+>
+> Use `<PawsEdgeGradient>` to add stylish scroll shadows.
+
 ---
 
 ## 2. Standard Project Structure
@@ -65,6 +114,15 @@ public class MyPlugin : IPawsPlugin
     {
         _host = host;
     }
+
+    // IHost Definition:
+    // interface IHost {
+    //    ILogger Logger { get; }
+    //    ILazerService Lazer { get; }
+    //    IStableService Stable { get; }
+    //    IStorageService Storage { get; }
+    //    bool IsLegacyMode { get; }
+    // }
 
     public async Task<object?> ExecuteCommandAsync(string commandName, object? payload)
     {
@@ -144,6 +202,51 @@ Our project templates enable **ImplicitUsings**. You do **not** need to explicit
 
 Keep your code clean by removing these redundant directives.
 
+### 🚫 Forbidden Namespaces & IStorageService
+
+Paws enforces a strict security sandbox. **Direct access to `System.IO` is blocked.** You must use `_host.Storage` for all file operations.
+
+**Blocked:**
+
+- `System.IO.File`, `System.IO.Directory`, `System.IO.Path` (partial)
+
+**Allowed Replacement (`IStorageService`):**
+
+- `_host.Storage.FileExists(path)`
+- `_host.Storage.DirectoryExists(path)`
+- `_host.Storage.GetFiles(path, pattern, option)`
+- `_host.Storage.OpenFile(path, mode, access)` -> Returns `Stream`
+- `_host.Storage.GetPluginDataPath()` -> Your private data folder.
+
+**Temp Storage Bridge (zero-copy):**
+
+- `Stream OpenTempStream(string handle)`: Read a temp file uploaded by UI.
+- `void MoveTempToData(string handle, string targetPath)`: Move temp file to persistent storage efficiently.
+
+### Image Processing (IImageProcessor)
+
+Plugins have access to **Magick.NET** via `_host.Image`. This allows for high-performance image resizing and format conversion without adding external dependencies.
+
+```csharp
+using (var sourceStream = _host.Storage.OpenFile(path, FileMode.Open, FileAccess.Read))
+{
+    // Resize/Convert
+    var options = new ImageProcessOptions
+    {
+        TargetFormat = "jpg",
+        Quality = 85,
+        // (Optional) Resize
+        // ResizeWidth = 1920
+    };
+
+    using (var resultStream = await _host.Image.ProcessImageAsync(sourceStream, options))
+    using (var dest = _host.Storage.OpenFile(destPath, FileMode.Create, FileAccess.Write))
+    {
+        await resultStream.CopyToAsync(dest);
+    }
+}
+```
+
 ### Dynamic Core Access
 
 The Paws Core API is evolving. While strict interfaces (`IHost`, `ILazerContext`) are preferred, you can use `dynamic` casting to access new features not yet exposed in the interface.
@@ -183,6 +286,16 @@ Adding a new plugin to the workspace?
   "entryPoint": "MyPlugin.dll",
   "ui": {
     "entry": "ui/index.html"
-  }
+  },
+  "permissions": [
+    "filesystem-osu" // basic access to osu! folders
+  ]
 }
 ```
+
+### Valid Permissions
+
+- **(empty)**: Sandboxed to plugin's own Data/Temp folders.
+- **`filesystem-osu`**: Read/Write access to the user's osu! (Lazer/Stable) storage.
+- **`filesystem-ext`**: Full system access (Requires user audit).
+- **`unsafe-access`**: Bypasses security scanner. **Security Risk**. Plugin will likely be flagged.

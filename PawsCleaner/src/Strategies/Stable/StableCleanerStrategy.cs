@@ -2,6 +2,7 @@ using Paws.Core.Abstractions;
 using Paws.Core.Abstractions.Enums;
 using Paws.Core.Abstractions.Interfaces.Contexts;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
@@ -23,9 +24,7 @@ namespace PawsCleaner.Strategies.Stable
         public StableCleanerStrategy(IHost host)
         {
             _host = host;
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var pluginData = Path.Combine(appData, "PawsCleaner");
-            Directory.CreateDirectory(pluginData);
+            var pluginData = _host.Storage.GetPluginDataPath();
             _indexDbPath = Path.Combine(pluginData, "stable_index.realm");
             _indexer = new StableIndexer(host, Name);
             _assetCleaner = new StableAssetCleaner(host, Name);
@@ -43,24 +42,28 @@ namespace PawsCleaner.Strategies.Stable
 
             long freedBytes = 0;
 
-            await _host.PerformStableWriteAsync(stablePath =>
+            // --- Prepare Assets (BG) Outside the write lock because it's async ---
+            var bgPrep = await _assetCleaner.PrepareBackgroundsAsync(options);
+
+            await _host.Stable.PerformStableWriteAsync(stablePath =>
             {
-                var stable = _host.GetStableContext();
+                var stable = _host.Stable.GetStableContext();
                 var dbPath = Path.Combine(stablePath, "osu!.db");
+                string pluginData = _host.Storage.GetPluginDataPath();
                 string songDir = "";
-                try { songDir = ((dynamic)stable).GetSongsPath(); }
+                try { songDir = stable.GetSongsPath(); }
                 catch { songDir = Path.Combine(stablePath, "Songs"); } // Fallback
 
-                _host.LogMessage($"[CONFIG] Mode: {options.Mode}, DryRun: {options.DryRun}", PawsLogLvl.Information, Name);
-                _host.LogMessage($"[CONFIG] Delete Rulesets? Osu: {options.Rulesets?.Osu ?? false}, Taiko: {options.Rulesets?.Taiko ?? false}, Catch: {options.Rulesets?.Catch ?? false}, Mania: {options.Rulesets?.Mania ?? false}", PawsLogLvl.Information, Name);
-                _host.LogMessage("Reading osu!.db...", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"[CONFIG] Mode: {options.Mode}", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"[CONFIG] Delete Rulesets? Osu: {options.Rulesets?.Osu ?? false}, Taiko: {options.Rulesets?.Taiko ?? false}, Catch: {options.Rulesets?.Catch ?? false}, Mania: {options.Rulesets?.Mania ?? false}", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"Reading {dbPath}...", PawsLogLvl.Information, Name);
 
                 var db = stable.ReadOsuDatabase(dbPath);
 
                 // --- 1. Ruleset Cleaning ---
                 var mapsToRemove = new List<dynamic>();
                 var dbBeatmaps = db.Beatmaps.ToList();
-                _host.LogMessage($"[ANALYSIS] Found {dbBeatmaps.Count} total beatmaps in osu!.db.", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"[ANALYSIS] Found {dbBeatmaps.Count} total beatmaps in osu!.db.", PawsLogLvl.Information, Name);
 
                 foreach (var map in dbBeatmaps)
                 {
@@ -99,45 +102,28 @@ namespace PawsCleaner.Strategies.Stable
                             default: delOther++; break;
                         }
 
-                        if (options.DryRun)
-                        {
-                            deletedMaps++;
-                            mapsToRemove.Add(map);
-                        }
-                        else
-                        {
-                            mapsToRemove.Add(map);
-                            deletedMaps++;
+                        mapsToRemove.Add(map);
+                        deletedMaps++;
 
-                            try
+                        try
+                        {
+                            var osuPath = Path.Combine(songDir, map.FolderName, map.FileName);
+                            if (_host.Storage.FileExists(osuPath))
                             {
-                                var osuPath = Path.Combine(songDir, map.FolderName, map.FileName);
-                                if (File.Exists(osuPath))
-                                {
-                                    var fi = new FileInfo(osuPath);
-                                    freedBytes += fi.Length;
-                                    File.Delete(osuPath);
-                                }
+                                // var fi = new FileInfo(osuPath); // Fails scanner! Need Length from Storage
+                                freedBytes += _host.Storage.GetFileLength(osuPath);
+                                _host.Storage.DeleteFile(osuPath);
                             }
-                            catch { /* Ignore IO errors */ }
                         }
+                        catch { /* Ignore IO errors */ }
                     }
                 }
 
-                if (!options.DryRun && mapsToRemove.Count > 0)
+                if (mapsToRemove.Count > 0)
                 {
-                    _host.LogMessage($"Removing {mapsToRemove.Count} maps from DB...", PawsLogLvl.Information, Name);
+                    _host.Logger.LogMessage($"Removing {mapsToRemove.Count} maps from DB...", PawsLogLvl.Information, Name);
                     foreach (var m in mapsToRemove) db.RemoveBeatmap(m);
                     stable.WriteOsuDatabase(db, dbPath);
-                }
-                else if (options.DryRun)
-                {
-                    string stats = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
-                    string srcStats = $"Osu: {srcOsu}, Taiko: {srcTaiko}, Catch: {srcCatch}, Mania: {srcMania}, Other: {srcOther}";
-
-                    _host.LogMessage($"[ANALYSIS] Source Distribution: {srcStats}", PawsLogLvl.Information, Name);
-                    _host.LogMessage($"[DRY RUN SUMMARY] Found {mapsToRemove.Count} maps to delete.", PawsLogLvl.Information, Name);
-                    _host.LogMessage($"[DRY RUN STATS] Breakdown: {stats}", PawsLogLvl.Information, Name);
                 }
 
 
@@ -153,7 +139,7 @@ namespace PawsCleaner.Strategies.Stable
                 }
                 catch (Exception ex)
                 {
-                    _host.LogMessage($"[Error] Failed to build Realm schema: {ex.Message}", PawsLogLvl.Error, Name);
+                    _host.Logger.LogMessage($"[Error] Failed to build Realm schema: {ex.Message}", PawsLogLvl.Error, Name);
                 }
 
                 Realm realm;
@@ -163,21 +149,21 @@ namespace PawsCleaner.Strategies.Stable
                 }
                 catch (Exception ex)
                 {
-                    _host.LogMessage($"Realm Open Failed: {ex.Message}. Recreating Index...", PawsLogLvl.Warning, Name);
-                    try { File.Delete(_indexDbPath); } catch { }
-                    try { Directory.Delete(Path.Combine(_indexDbPath, "management"), true); } catch { }
+                    _host.Logger.LogMessage($"Realm Open Failed: {ex.Message}. Recreating Index...", PawsLogLvl.Warning, Name);
+                    try { _host.Storage.DeleteFile(_indexDbPath); } catch { }
+                    try { _host.Storage.DeleteDirectory(Path.Combine(_indexDbPath, "management"), true); } catch { }
 
                     realm = Realm.GetInstance(realmConfig);
                 }
 
                 using (realm)
                 {
-                    _host.LogMessage($"Realm Opened! Schema Count: {realm.Schema.Count}", PawsLogLvl.Information, Name);
+                    _host.Logger.LogMessage($"Realm Opened! Schema Count: {realm.Schema.Count}", PawsLogLvl.Information, Name);
 
                     var validHashes = new HashSet<string>();
                     var mapsToIndex = new List<dynamic>();
 
-                    _host.LogMessage("Verifying index integrity...", PawsLogLvl.Information, Name);
+                    _host.Logger.LogMessage("Verifying index integrity...", PawsLogLvl.Information, Name);
 
                     foreach (var map in db.Beatmaps)
                     {
@@ -194,15 +180,15 @@ namespace PawsCleaner.Strategies.Stable
                         else
                         {
                             var mapFolder = Path.Combine(songDir, map.FolderName);
-                            if (Directory.Exists(mapFolder))
+                            if (_host.Storage.DirectoryExists(mapFolder))
                             {
-                                var lastWrite = Directory.GetLastWriteTimeUtc(mapFolder);
+                                var lastWrite = _host.Storage.GetLastWriteTimeUtc(mapFolder);
 
                                 // Check .osu file timestamp too, as folder time doesn't change on file content edit
                                 var osuPath = Path.Combine(mapFolder, map.FileName);
-                                if (File.Exists(osuPath))
+                                if (_host.Storage.FileExists(osuPath))
                                 {
-                                    var osuWrite = File.GetLastWriteTimeUtc(osuPath);
+                                    var osuWrite = _host.Storage.GetLastWriteTimeUtc(osuPath);
                                     if (osuWrite > lastWrite) lastWrite = osuWrite;
                                 }
 
@@ -230,26 +216,26 @@ namespace PawsCleaner.Strategies.Stable
                     // Indexing
                     if (mapsToIndex.Count > 0)
                     {
-                        _host.LogMessage($"Indexing {mapsToIndex.Count} maps...", PawsLogLvl.Information, Name);
+                        _host.Logger.LogMessage($"Indexing {mapsToIndex.Count} maps...", PawsLogLvl.Information, Name);
                         _indexer.IndexMaps(realm, stable, mapsToIndex, songDir);
                     }
 
                     // Execute Cleaning
-                    _assetCleaner.ExecuteAssetCleaning(realm, options, songDir, ref deletedFiles, ref freedBytes);
+                    var result = _assetCleaner.ExecuteAssetCleaning(realm, options, songDir, bgPrep.srcJpg, bgPrep.srcPng, bgPrep.srcCreated);
+                    deletedFiles += result.deletedFiles;
+                    freedBytes += result.freedBytes;
                 }
             });
 
             string statsStr = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
             string srcStatsStr = $"Osu: {srcOsu}, Taiko: {srcTaiko}, Catch: {srcCatch}, Mania: {srcMania}, Other: {srcOther}";
 
-            string msg = options.DryRun
-                ? $"[DRY RUN] Found {deletedMaps} maps ({statsStr}) to delete. (Source: {srcStatsStr})"
-                : $"Cleanup Complete. Deleted {deletedMaps} maps ({statsStr}), {deletedFiles} files. (Source: {srcStatsStr})";
+            string msg = $"Cleanup Complete. Deleted {deletedMaps} maps ({statsStr}), {deletedFiles} files. (Source: {srcStatsStr})";
 
             return new
             {
                 Success = true,
-                Message = msg + (options.DryRun ? "" : $" Freed {freedBytes / 1024 / 1024} MB.")
+                Message = msg + $" Freed {freedBytes / 1024 / 1024} MB."
             };
         }
 

@@ -13,6 +13,16 @@ document.addEventListener("DOMContentLoaded", () => {
 				resultDiv.textContent = `Mode changed to: ${currentMode}. Ready to test.`;
 			}
 		});
+
+		// Listen for lifecycle events (V3)
+		window.paws.on("lifecycle", event => {
+			console.log(`[Lifecycle] UI received: ${event}`);
+			if (event === "focus") {
+				resultDiv.textContent += "\n[Lifecycle] FOCUSED";
+			} else if (event === "blur") {
+				resultDiv.textContent += "\n[Lifecycle] BLURRED";
+			}
+		});
 	} else {
 		resultDiv.textContent = "Error: window.paws API not found. The paws-frontend-api.js script might have failed to load.";
 	}

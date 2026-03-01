@@ -1,0 +1,12 @@
+{
+  "last_updated": "2026-03-01T09:55:22Z",
+  "plugins": [
+    {
+      "id": "osupaws.cleaner",
+      "min_paws_version": "0.0.2",
+      "download_url": "https://github.com/osupaws/paws-plugins/releases/download/latest/PawsCleaner.pawsplugin",
+      "version": "0.0.1",
+      "name": "Paws Cleaner"
+    }
+  ]
+}

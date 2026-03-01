@@ -11,7 +11,7 @@ using Paws.Core.Abstractions.Interfaces.Services;
 
 namespace MyPlugin
 {
-    public class MyPlugin : IPawsPlugin
+    public class MyPlugin : IPawsPlugin, ISupportsLifecycle
     {
         public string Id => "author.template-plugin";
 
@@ -26,8 +26,20 @@ namespace MyPlugin
         {
             _host = host;
             // Initialization logic (e.g. logging)
-            _host.LogMessage($"{Name} initialized correctly!", PawsLogLvl.Information, "MyPlugin");
+            _host.Logger.LogMessage($"{Name} initialized correctly!", PawsLogLvl.Information, "MyPlugin");
 
+            return Task.CompletedTask;
+        }
+
+        public Task OnUiWakeAsync()
+        {
+            _host?.Logger.LogMessage("UI Woke Up", PawsLogLvl.Verbose, "MyPlugin");
+            return Task.CompletedTask;
+        }
+
+        public Task OnUiSleepAsync()
+        {
+            _host?.Logger.LogMessage("UI Sleeping", PawsLogLvl.Verbose, "MyPlugin");
             return Task.CompletedTask;
         }
 
@@ -46,8 +58,8 @@ namespace MyPlugin
                 }
 
                 // 2. Determine Strategy (Router Pattern)
-                bool isLegacy = false;
-                try { isLegacy = ((dynamic)_host).IsLegacyMode; } catch { }
+                // Use the Interface property directly (Core V2+)
+                bool isLegacy = _host.IsLegacyMode;
 
                 IMyStrategy strategy = isLegacy
                     ? new StableStrategy(_host)
@@ -58,7 +70,7 @@ namespace MyPlugin
             }
             catch (Exception ex)
             {
-                _host.LogMessage($"{Name} Error: {ex.Message}", PawsLogLvl.Error, "MyPlugin");
+                _host.Logger.LogMessage($"{Name} Error: {ex.Message}", PawsLogLvl.Error, "MyPlugin");
                 return new { Success = false, Error = ex.Message };
             }
         }

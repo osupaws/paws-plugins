@@ -3,6 +3,7 @@ using PawsCleaner.Strategies.Lazer.Components;
 using Paws.Core.Abstractions.Enums;
 using Paws.Core.Abstractions.Interfaces.Contexts;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces;
 using Paws.Core.Abstractions.Models;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
@@ -36,15 +37,14 @@ namespace PawsCleaner.Strategies.Lazer
 
             return await Task.Run(async () =>
             {
-                var context = _host.GetLazerContext();
-                if (context == null) return new { Success = false, Message = "Failed to access ILazerContext (Core 2.0)." };
+                var context = _host.Lazer.GetLazerContext();
+                if (context == null) return new { Success = false, Message = "Failed to access ILazerContext (Core V3)." };
 
-                _host.LogMessage("Starting Lazer cleanup (Core 2.0)...", PawsLogLvl.Information, Name);
-                _host.LogMessage($"[CONFIG] Mode: {options.Mode}, DryRun: {options.DryRun}", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage("Starting Lazer cleanup (Core V3)...", PawsLogLvl.Information, Name);
+                _host.Logger.LogMessage($"[CONFIG] Mode: {options.Mode}", PawsLogLvl.Information, Name);
 
                 // --- CACHE SETUP ---
-                string appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PawsCleaner");
-                Directory.CreateDirectory(appData);
+                string appData = _host.Storage.GetPluginDataPath();
                 string cachePath = Path.Combine(appData, CACHE_FILENAME);
 
                 // Initialize Realm Cache
@@ -54,6 +54,7 @@ namespace PawsCleaner.Strategies.Lazer
                     SchemaVersion = 1,
                     Schema = new[] { typeof(CachedLazerSet) }
                 };
+
 
 
                 string currentOptionsHash = CachedLazerSet.ComputeOptionsHash(options);
@@ -86,11 +87,6 @@ namespace PawsCleaner.Strategies.Lazer
                             continue;
                         }
 
-                        if (options.DryRun)
-                        {
-                            setsToProcess.Add(set);
-                            continue;
-                        }
 
                         // Scoped Realm Access for Filtering
                         bool cacheHit = false;
@@ -121,14 +117,14 @@ namespace PawsCleaner.Strategies.Lazer
                         catch (Exception ex)
                         {
                             // If realm fails, process anyway
-                            _host.LogMessage($"[CACHE] Error accessing cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
+                            _host.Logger.LogMessage($"[CACHE] Error accessing cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
                         }
 
                         if (!cacheHit) setsToProcess.Add(set);
                     }
 
-                    if (skippedByCache > 0 && !options.DryRun)
-                        _host.LogMessage($"[CACHE] Skipped {skippedByCache} clean beatmap sets.", PawsLogLvl.Information, Name);
+                    if (skippedByCache > 0)
+                        _host.Logger.LogMessage($"[CACHE] Skipped {skippedByCache} clean beatmap sets.", PawsLogLvl.Information, Name);
 
 
                     // --- PREPARE ASSETS (BG Replacement) ---
@@ -137,7 +133,7 @@ namespace PawsCleaner.Strategies.Lazer
                     (string? importedJpg, string? importedPng, bool bgImported) = await _assetCleaner.PrepareBackgroundsAsync(context, options);
 
                     // --- PROCESSING LOOP ---
-                    _host.LogMessage($"Processing {setsToProcess.Count} sets...", PawsLogLvl.Information, Name);
+                    _host.Logger.LogMessage($"Processing {setsToProcess.Count} sets...", PawsLogLvl.Information, Name);
 
                     var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     var bgFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -199,39 +195,36 @@ namespace PawsCleaner.Strategies.Lazer
                             }
 
                             // B. Asset Cleaning via Component
-                            if (!options.DryRun)
+                            // B.1 Populate protected lists from metadata
+                            protectedFiles.Clear();
+                            bgFiles.Clear();
+                            foreach (var map in set.Beatmaps)
                             {
-                                // B.1 Populate protected lists from metadata
-                                protectedFiles.Clear();
-                                bgFiles.Clear();
-                                foreach (var map in set.Beatmaps)
+                                if (map.Metadata == null) continue;
+                                string? audio = map.Metadata?.AudioFile;
+                                if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
+                                string? bg = map.Metadata?.BackgroundFile;
+                                if (!string.IsNullOrEmpty(bg))
                                 {
-                                    if (map.Metadata == null) continue;
-                                    string? audio = map.Metadata?.AudioFile;
-                                    if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
-                                    string? bg = map.Metadata?.BackgroundFile;
-                                    if (!string.IsNullOrEmpty(bg))
-                                    {
-                                        bgFiles.Add(bg);
-                                        if (!bgImported) protectedFiles.Add(bg);
-                                    }
+                                    bgFiles.Add(bg);
+                                    if (!bgImported) protectedFiles.Add(bg);
                                 }
+                            }
 
-                                int assetRemovals = _assetCleaner.Execute(context, set, options, importedJpg, importedPng, bgFiles, protectedFiles, bgImported);
-                                if (assetRemovals > 0)
-                                {
-                                    setsProcessed++;
-                                }
+                            int assetRemovals = _assetCleaner.Execute(context, set, options, importedJpg, importedPng, bgFiles, protectedFiles, bgImported);
+                            if (assetRemovals > 0)
+                            {
+                                setsProcessed++;
                             }
                         }
                         catch (Exception ex)
                         {
-                            _host.LogMessage($"[Lazer] Error {ex.Message}", PawsLogLvl.Error, Name);
+                            _host.Logger.LogMessage($"[Lazer] Error {ex.Message}", PawsLogLvl.Error, Name);
                         }
 
                         // --- UPDATE CACHE ---
-                        // Only if not dry run, not deleted
-                        if (!options.DryRun && !setsToDelete.Contains(set.Id))
+                        // Only if not deleted
+                        if (!setsToDelete.Contains(set.Id))
                         {
                             // Retrieve updated hash
                             string setIdStr = set.Id.ToString();
@@ -265,7 +258,7 @@ namespace PawsCleaner.Strategies.Lazer
                                 }
                                 catch (Exception ex)
                                 {
-                                    _host.LogMessage($"[CACHE] Error updating cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
+                                    _host.Logger.LogMessage($"[CACHE] Error updating cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
                                 }
                             }
                         }
@@ -274,63 +267,52 @@ namespace PawsCleaner.Strategies.Lazer
                     // --- EXECUTE MASS DELETIONS ---
                     if (mapsToDelete.Count > 0)
                     {
-                        if (options.DryRun) _host.LogMessage($"[DRY RUN] Would delete {mapsToDelete.Count} beatmaps.", PawsLogLvl.Information, Name);
-                        else
-                        {
-                            context.DeleteBeatmaps(mapsToDelete);
-                        }
+                        context.DeleteBeatmaps(mapsToDelete);
                     }
 
                     if (setsToDelete.Count > 0)
                     {
-                        if (options.DryRun) _host.LogMessage($"[DRY RUN] Would delete {setsToDelete.Count} beatmap sets.", PawsLogLvl.Information, Name);
-                        else
+                        context.DeleteBeatmapSets(setsToDelete);
+                        // Clean cache for deleted sets
+                        try
                         {
-                            context.DeleteBeatmapSets(setsToDelete);
-                            // Clean cache for deleted sets
-                            try
+                            using var deleteRealm = Realm.GetInstance(realmConfig);
+                            deleteRealm.Write(() =>
                             {
-                                using var deleteRealm = Realm.GetInstance(realmConfig);
-                                deleteRealm.Write(() =>
+                                foreach (var sid in setsToDelete)
                                 {
-                                    foreach (var sid in setsToDelete)
-                                    {
-                                        var obj = deleteRealm.Find<CachedLazerSet>(sid.ToString());
-                                        if (obj != null) deleteRealm.Remove(obj);
-                                    }
-                                });
-                            }
-                            catch (Exception ex)
-                            {
-                                _host.LogMessage($"[CACHE] Error cleaning deletion cache: {ex.Message}", PawsLogLvl.Warning, Name);
-                            }
+                                    var obj = deleteRealm.Find<CachedLazerSet>(sid.ToString());
+                                    if (obj != null) deleteRealm.Remove(obj);
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _host.Logger.LogMessage($"[CACHE] Error cleaning deletion cache: {ex.Message}", PawsLogLvl.Warning, Name);
                         }
                     }
 
                     // --- ORPHANS ---
-                    if (!options.DryRun)
+                    /* WE ARE IGNORING ORPHANS FOR NOW (until we fix safeOrphans search logic). For now we trust lazer's GC.
+                    try
                     {
-                        try
+                        List<string> safeOrphans = context.GetSafeOrphanHashes();
+                        if (safeOrphans.Count > 0)
                         {
-                            List<string> safeOrphans = context.GetSafeOrphanHashes();
-                            if (safeOrphans.Count > 0)
-                            {
-                                context.DeleteFiles(safeOrphans);
-                            }
+                            context.DeleteFiles(safeOrphans);
                         }
-                        catch { }
                     }
+                    catch { }
+                    */
 
                     string stats = $"Osu: {delOsu}, Taiko: {delTaiko}, Catch: {delCatch}, Mania: {delMania}, Other: {delOther}";
-                    string msg = options.DryRun
-                        ? $"[DRY RUN] Found {mapsToDelete.Count} maps and {setsToDelete.Count} sets to delete."
-                        : $"Cleanup Complete. Processed {setsProcessed} sets (Skipped {skippedByCache}). Deleted {mapsDeleted} maps. ({stats})";
+                    string msg = $"Cleanup Complete. Processed {setsProcessed} sets (Skipped {skippedByCache}). Deleted {mapsDeleted} maps. ({stats})";
 
                     return new { Success = true, Message = msg };
                 }
                 catch (Exception ex)
                 {
-                    _host.LogMessage($"Lazer cleanup error: {ex}", PawsLogLvl.Error, Name);
+                    _host.Logger.LogMessage($"Lazer cleanup error: {ex}", PawsLogLvl.Error, Name);
                     return new { Success = false, Message = $"Error: {ex.Message}" };
                 }
             });

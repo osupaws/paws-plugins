@@ -9,5 +9,6 @@
     "entry": "ui/index.html"
   },
   "icon": "icon.svg",
-  "minAppVersion": "1.0.0"
+  "minAppVersion": "0.0.2",
+  "permissions": ["filesystem-osu"]
 }

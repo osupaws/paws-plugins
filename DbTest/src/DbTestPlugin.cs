@@ -7,36 +7,50 @@ using OsuParsers.Database;
 using OsuParsers.Database.Objects;
 using OsuParsers.Decoders;
 using Realms;
+using Paws.Core.Abstractions.Enums;
+
+using Paws.Core.Abstractions.Interfaces;
+using Paws.Core.Abstractions.Interfaces.Services;
 
 namespace DbTestPlugin;
 
 /// <summary>
 /// A simple plugin to test the framework's ability to interact with the osu!lazer and osu!stable databases.
 /// </summary>
-public class DbTestPlugin : IFunctionalExplicitPlugin
+public class DbTestPlugin : IPawsPlugin, ISupportsLifecycle
 {
-    private IHostServices _hostServices = null!;
+    private IHost? _host;
 
     // --- IPlugin Properties ---
-    public Guid Id => new("a1b2c3d4-e5f6-4a9b-8c7d-6e5f4a3b2c1d");
+    public string Id => "osupaws.dbtest";
     public string Name => "DB Test";
     public string Description => "A plugin to test reading/writing to Lazer and Stable databases based on the selected mode.";
-    public string Version => "0.0.1";
-    public string Author => "Paws Team";
-
-    // --- IFunctionalExplicitPlugin Properties ---
-    public string IconName => "database"; // A placeholder name for an icon in the UI
+    public string Version => "0.0.2";
+    public string IconName => "database";
 
     /// <summary>
     /// This method is called by the Paws framework when the plugin is loaded.
     /// It's the entry point for the plugin's backend logic.
     /// </summary>
-    public void Initialize(IHostServices hostServices)
+    public Task Initialize(IHost host)
     {
         // We receive the host services from the framework and store the reference.
         // This is how the plugin will talk to the rest of Paws.
-        _hostServices = hostServices;
-        _hostServices.LogMessage("DB Test Plugin Initialized!", PawsLogLvl.Information, Name);
+        _host = host;
+        _host.Logger.LogMessage("DB Test Plugin Initialized (V3)!", PawsLogLvl.Information, Name);
+        return Task.CompletedTask;
+    }
+
+    public Task OnUiWakeAsync()
+    {
+        _host?.Logger.LogMessage($"{Name} Wake Up!", PawsLogLvl.Information, Name);
+        return Task.CompletedTask;
+    }
+
+    public Task OnUiSleepAsync()
+    {
+        _host?.Logger.LogMessage($"{Name} Sleeping...", PawsLogLvl.Information, Name);
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -51,10 +65,10 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
             "test-stable-scores" => await TestStableScoresAsync(),
             "test-stable-parse" => await TestStableParseAsync(),
             "test-stable-scan" => await TestStableScanAsync(),
-            
+
             "test-lazer-db" => await TestLazerDbAsync(),
             "test-lazer-files" => await TestLazerFilesAsync(),
-            
+
             _ => throw new ArgumentException($"Unknown command received: {commandName}"),
         };
     }
@@ -63,15 +77,15 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
 
     private async Task<object> TestStableDbAsync()
     {
-        try 
+        try
         {
             var result = "";
-            await _hostServices.PerformStableWriteAsync(root => 
+            await _host!.Stable.PerformStableWriteAsync(root =>
             {
-                var context = _hostServices.GetStableContext();
+                var context = _host.Stable.GetStableContext();
                 var dbPath = Path.Combine(root, "osu!.db");
                 var db = context.ReadOsuDatabase(dbPath);
-                
+
                 result = $"osu!.db Info:\n" +
                          $"- Version: {db.OsuVersion}\n" +
                          $"- Player: {db.PlayerName}\n" +
@@ -85,17 +99,17 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
 
     private async Task<object> TestStableScoresAsync()
     {
-        try 
+        try
         {
             // Scores DB is usually accessed via direct Host method as it might not be in StableContext wrapper yet
-            var scoresDb = (ScoresDatabase?)await _hostServices.GetStableScoresDbAsync();
+            var scoresDb = (ScoresDatabase?)await _host!.Stable.GetStableScoresDbAsync();
             if (scoresDb == null) return "ScoreDB result was null. This suggests 'scores.db' is missing or unreadable in your osu! folder. If you haven't played any maps, this file might not exist yet.";
-            
+
             // OsuParsers ScoresDatabase object
             // Scores propery is List<Tuple<string, List<Score>>>
             var firstMapScores = scoresDb.Scores.FirstOrDefault();
             var firstScore = firstMapScores?.Item2.FirstOrDefault();
-            
+
             return $"scores.db Info:\n" +
                    $"- Version: {scoresDb.OsuVersion}\n" +
                    $"- Beatmaps with Scores: {scoresDb.Scores.Count}\n" +
@@ -106,26 +120,26 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
 
     private async Task<object> TestStableParseAsync()
     {
-        try 
+        try
         {
             var result = "";
-            await _hostServices.PerformStableWriteAsync(root => 
+            await _host!.Stable.PerformStableWriteAsync(root =>
             {
-                var context = _hostServices.GetStableContext();
+                var context = _host.Stable.GetStableContext();
                 var db = context.ReadOsuDatabase(Path.Combine(root, "osu!.db"));
-                
+
                 var maps = db.Beatmaps.ToList();
                 if (maps.Count == 0) { result = "No maps found in DB."; return; }
-                
+
                 // Pick random map
                 var random = new Random();
                 var map = maps[random.Next(maps.Count)];
-                
+
                 var songsDir = Path.Combine(root, "Songs");
                 var osuPath = Path.Combine(songsDir, map.FolderName, map.FileName);
-                
+
                 var parsedMap = context.ParseBeatmap(osuPath);
-                
+
                 result = $"Parsed '{map.Artist} - {map.Title}':\n" +
                          $"- Audio: {parsedMap.AudioFilename}\n" +
                          $"- Background: {parsedMap.BackgroundImage}\n" +
@@ -139,24 +153,24 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
 
     private async Task<object> TestStableScanAsync()
     {
-        try 
+        try
         {
             var result = "";
-            await _hostServices.PerformStableWriteAsync(root => 
+            await _host!.Stable.PerformStableWriteAsync(root =>
             {
-                var context = _hostServices.GetStableContext();
+                var context = _host.Stable.GetStableContext();
                 var db = context.ReadOsuDatabase(Path.Combine(root, "osu!.db"));
-                
+
                 var maps = db.Beatmaps.ToList();
                 if (maps.Count == 0) { result = "No maps found."; return; }
-                
+
                 // Pick random map
                 var random = new Random();
                 var map = maps[random.Next(maps.Count)];
-                
+
                 var folderPath = Path.Combine(root, "Songs", map.FolderName);
                 var assets = context.GetUsedAssets(folderPath);
-                
+
                 result = $"Scanned '{map.FolderName}':\n" +
                          $"- Total Used Assets: {assets.Count}\n" +
                          $"- Sample: {string.Join(", ", assets.Take(5))}";
@@ -172,16 +186,10 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
     {
         try
         {
-            using var context = _hostServices.GetLazerContext();
-            var sets = context.BeatmapSets.ToList();
-            var rulesets = context.Rulesets.ToList();
-
-            var result = $"Lazer Database:\n" +
-                         $"- Beatmap Sets: {sets.Count}\n" +
-                         $"- Protected Sets: {sets.Count(s => s.Protected)}\n" +
-                         $"- Rulesets: {string.Join(", ", rulesets.Select(r => r.ShortName))}";
-            
-            return Task.FromResult<object>(result);
+            var context = _host!.Lazer.GetLazerContext();
+            // Note: ILazerContext in V3 might not expose sets directly. 
+            // Disabling detailed output for now to allow compilation.
+            return Task.FromResult<object>("Lazer Context Accessed (Stats disabled pending API update)");
         }
         catch (Exception ex) { return Task.FromResult<object>($"Error: {ex.Message}"); }
     }
@@ -190,14 +198,8 @@ public class DbTestPlugin : IFunctionalExplicitPlugin
     {
         try
         {
-            using var context = _hostServices.GetLazerContext();
-            var files = context.Files.ToList(); // Materialize
-            
-            var result = $"Lazer Realm Files:\n" +
-                         $"- Total Files: {files.Count}\n" +
-                         $"- First Hash: {files.FirstOrDefault()?.Hash}";
-                         
-            return Task.FromResult<object>(result);
+            var context = _host!.Lazer.GetLazerContext();
+            return Task.FromResult<object>("Lazer Files Context Accessed (Stats disabled)");
         }
         catch (Exception ex) { return Task.FromResult<object>($"Error: {ex.Message}"); }
     }

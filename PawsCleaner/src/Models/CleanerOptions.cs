@@ -3,7 +3,6 @@ namespace PawsCleaner.Models
     public class CleanerOptions
     {
         public string? Mode { get; set; }
-        public bool DryRun { get; set; }
         public RulesetOptions? Rulesets { get; set; }
         public AssetOptions? Assets { get; set; }
     }
@@ -24,7 +23,6 @@ namespace PawsCleaner.Models
         public bool Storyboards { get; set; }
 
         public string? BackgroundMode { get; set; }
-        public string? CustomBackgroundPng { get; set; }
-        public string? CustomBackgroundJpg { get; set; }
+        public string? CustomBackgroundAssetId { get; set; }
     }
 }
