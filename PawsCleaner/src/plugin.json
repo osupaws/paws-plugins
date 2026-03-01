@@ -1,7 +1,7 @@
 {
   "id": "osupaws.cleaner",
   "name": "Paws Cleaner",
-  "version": "0.0.2",
+  "version": "0.0.1",
   "author": "Paws Team",
   "description": "A powerful system cleaner for osu!",
   "entryPoint": "PawsCleaner.dll",
@@ -9,6 +9,6 @@
     "entry": "ui/index.html"
   },
   "icon": "icon.svg",
-  "minAppVersion": "1.0.0",
+  "minAppVersion": "0.0.2",
   "permissions": ["filesystem-osu"]
 }
