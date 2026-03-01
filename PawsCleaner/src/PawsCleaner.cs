@@ -3,6 +3,7 @@ using Paws.Core.Abstractions.Enums;
 using Paws.Core.Abstractions.Interfaces;
 using Paws.Core.Abstractions.Interfaces.Services;
 using Paws.Core.Abstractions.Models;
+using Paws.Core.Abstractions.Exceptions;
 using PawsCleaner.Abstractions;
 using PawsCleaner.Models;
 using PawsCleaner.Strategies.Lazer;
@@ -88,10 +89,27 @@ namespace PawsCleaner
                 {
                     return await strategy.CleanAsync(options);
                 }
+                catch (StableIsRunningException ex)
+                {
+                    _host.Logger.LogMessage($"Cleanup aborted: {ex.Message}", PawsLogLvl.Warning, Name);
+                    return new { Success = false, Message = $"Cannot clean while osu!stable is running. Please close the game." };
+                }
+                catch (LazerIsRunningException ex)
+                {
+                    _host.Logger.LogMessage($"Cleanup aborted: {ex.Message}", PawsLogLvl.Warning, Name);
+                    return new { Success = false, Message = $"Cannot clean while osu!lazer is running. Please close the game." };
+                }
                 catch (Exception ex)
                 {
+                    // If it's wrapped in AggregateException or TargetInvocationException due to async lambda
+                    var inner = ex.InnerException ?? ex;
+                    if (inner is StableIsRunningException || inner is LazerIsRunningException)
+                    {
+                        return new { Success = false, Message = $"Cannot clean while game is running. Please close it first." };
+                    }
+
                     _host.Logger.LogMessage($"Strategy execution failed: {ex.Message}", PawsLogLvl.Error, Name);
-                    return new { Success = false, Message = $"Critical Error: {ex.Message}" };
+                    return new { Success = false, Message = $"Critical Error: {inner.Message}" };
                 }
             }
 

@@ -43,9 +43,27 @@ namespace PawsCleaner.Strategies.Lazer
             return mask;
         }
 
-        public static string ComputeOptionsHash(CleanerOptions options)
+        public static string ComputeOptionsHash(CleanerOptions options, Paws.Core.Abstractions.Interfaces.Services.IStorageService? storage = null)
         {
             var json = JsonSerializer.Serialize(options, new JsonSerializerOptions { WriteIndented = false });
+
+            if (storage != null && options.Assets?.BackgroundMode?.ToLowerInvariant() == "custom")
+            {
+                string dataDir = storage.GetPluginDataPath();
+                string sourcePath = System.IO.Path.Combine(dataDir, "custom_bg.src");
+                if (storage.FileExists(sourcePath))
+                {
+                    try
+                    {
+                        using var stream = storage.OpenFile(sourcePath, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                        using var hashAlg = SHA256.Create();
+                        var hashBytes = hashAlg.ComputeHash(stream);
+                        json += $"|C_BG_H:{Convert.ToBase64String(hashBytes)}";
+                    }
+                    catch { }
+                }
+            }
+
             using var sha256 = SHA256.Create();
             var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
             return Convert.ToBase64String(bytes);

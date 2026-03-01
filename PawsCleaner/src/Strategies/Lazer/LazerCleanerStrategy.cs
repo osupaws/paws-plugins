@@ -35,6 +35,11 @@ namespace PawsCleaner.Strategies.Lazer
         {
             if (_host == null) return new { Success = false, Message = "Host not initialized." };
 
+            if (System.Diagnostics.Process.GetProcessesByName("osu").Length > 0 || System.Diagnostics.Process.GetProcessesByName("osu!").Length > 0)
+            {
+                return new { Success = false, Message = "Cannot clean while osu!lazer is running. Please close the game." };
+            }
+
             return await Task.Run(async () =>
             {
                 var context = _host.Lazer.GetLazerContext();
@@ -57,7 +62,7 @@ namespace PawsCleaner.Strategies.Lazer
 
 
 
-                string currentOptionsHash = CachedLazerSet.ComputeOptionsHash(options);
+                string currentOptionsHash = CachedLazerSet.ComputeOptionsHash(options, _host.Storage);
                 int currentFeaturesMask = CachedLazerSet.ComputeFeaturesMask(options);
                 int skippedByCache = 0;
 
@@ -240,8 +245,7 @@ namespace PawsCleaner.Strategies.Lazer
                                         var existing = updateRealm.Find<CachedLazerSet>(setIdStr);
                                         int mergedMask = currentFeaturesMask;
 
-                                        // If same version, accumulate features
-                                        if (existing != null && existing.SetHash == newHash)
+                                        if (existing != null)
                                         {
                                             mergedMask |= existing.AppliedFeaturesMask;
                                         }

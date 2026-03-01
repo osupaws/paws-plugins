@@ -7,8 +7,10 @@ using PawsCleaner.Abstractions;
 using PawsCleaner.Common;
 using PawsCleaner.Models;
 using Realms;
+using System;
+using System.Diagnostics;
+using System.Linq;
 using Realms.Schema;
-
 using PawsCleaner.Strategies.Stable.Components;
 
 namespace PawsCleaner.Strategies.Stable
@@ -32,6 +34,11 @@ namespace PawsCleaner.Strategies.Stable
 
         public async Task<object> CleanAsync(CleanerOptions options)
         {
+            if (Process.GetProcessesByName("osu!").Length > 0)
+            {
+                throw new Paws.Core.Abstractions.Exceptions.StableIsRunningException();
+            }
+
             // Stats
             int deletedMaps = 0;
             int deletedFiles = 0;
@@ -192,8 +199,14 @@ namespace PawsCleaner.Strategies.Stable
                                     if (osuWrite > lastWrite) lastWrite = osuWrite;
                                 }
 
-                                if (lastWrite > indexed.LastIndexedTime.AddSeconds(5))
-                                    needsIndex = true;
+                                if (lastWrite > indexed.LastIndexedTime)
+                                {
+                                    string currentOptionsHash = StableAssetCleaner.ComputeOptionsHash(options, _host.Storage);
+                                    if (indexed.OptionsHash != currentOptionsHash)
+                                    {
+                                        needsIndex = true;
+                                    }
+                                }
                             }
                         }
 

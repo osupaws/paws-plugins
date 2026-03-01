@@ -122,14 +122,27 @@ namespace PawsCleaner.Strategies.Stable.Components
                 realm.Write(() =>
                 {
                     var existing = realm.Find<IndexedBeatmap>(map.MD5Hash);
-                    if (existing != null) realm.Remove(existing);
+                    int appliedFeatures = 0;
+                    string optionsHash = "";
+                    DateTimeOffset lastClean = default;
+
+                    if (existing != null)
+                    {
+                        appliedFeatures = existing.AppliedFeaturesMask;
+                        optionsHash = existing.OptionsHash;
+                        lastClean = existing.LastCleanTime;
+                        realm.Remove(existing);
+                    }
 
                     var indexedMap = new IndexedBeatmap
                     {
                         Hash = map.MD5Hash,
                         FolderPath = map.FolderName,
                         LastIndexedTime = DateTimeOffset.UtcNow,
-                        ContentMask = contentMask
+                        ContentMask = contentMask,
+                        AppliedFeaturesMask = appliedFeatures,
+                        OptionsHash = optionsHash,
+                        LastCleanTime = lastClean
                     };
 
                     foreach (var filePath in allFiles)

@@ -24,9 +24,27 @@ namespace PawsCleaner.Strategies.Stable.Components
             _name = strategyName;
         }
 
-        public static string ComputeOptionsHash(CleanerOptions options)
+        public static string ComputeOptionsHash(CleanerOptions options, Paws.Core.Abstractions.Interfaces.Services.IStorageService? storage = null)
         {
             var json = JsonSerializer.Serialize(options, new JsonSerializerOptions { WriteIndented = false });
+
+            if (storage != null && options.Assets?.BackgroundMode?.ToLowerInvariant() == "custom")
+            {
+                string dataDir = storage.GetPluginDataPath();
+                string sourcePath = Path.Combine(dataDir, "custom_bg.src");
+                if (storage.FileExists(sourcePath))
+                {
+                    try
+                    {
+                        using var stream = storage.OpenFile(sourcePath, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                        using var hashAlg = SHA256.Create();
+                        var hashBytes = hashAlg.ComputeHash(stream);
+                        json += $"|C_BG_H:{Convert.ToBase64String(hashBytes)}";
+                    }
+                    catch { }
+                }
+            }
+
             using var sha256 = SHA256.Create();
             var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
             return Convert.ToBase64String(bytes);
@@ -134,7 +152,7 @@ namespace PawsCleaner.Strategies.Stable.Components
 
                 var allIndexed = realm.All<IndexedBeatmap>().ToList();
                 bool isNuke = assets.Skins && assets.Sounds && assets.Videos && assets.Storyboards;
-                string currentOptionsHash = ComputeOptionsHash(options);
+                string currentOptionsHash = ComputeOptionsHash(options, _host.Storage);
                 _host.Logger.LogMessage($"Asset Cleaning Options: Skins={assets.Skins}, Sounds={assets.Sounds}, Videos={assets.Videos}, SB={assets.Storyboards}, BGMode={assets.BackgroundMode}, Nuke={isNuke}", PawsLogLvl.Information, _name);
 
                 int currentFeaturesMask = 0;
@@ -172,6 +190,9 @@ namespace PawsCleaner.Strategies.Stable.Components
                     var mapFolder = Path.Combine(songDir, map.FolderPath);
                     if (!_host.Storage.DirectoryExists(mapFolder)) continue;
 
+                    int deletedThisMap = 0;
+                    bool bgReplacedForMap = false;
+
                     foreach (var file in map.Files)
                     {
                         bool shouldDelete = false;
@@ -195,6 +216,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                             {
                                 shouldDelete = true;
                                 isReplacement = true;
+                                bgReplacedForMap = true;
                             }
                         }
 
@@ -225,6 +247,7 @@ namespace PawsCleaner.Strategies.Stable.Components
                                     freedBytes += _host.Storage.GetFileLength(fullPath);
                                     _host.Storage.DeleteFile(fullPath);
                                     deletedFiles++;
+                                    deletedThisMap++;
 
                                     if (isReplacement && !string.IsNullOrEmpty(replacementSource) && _host.Storage.FileExists(replacementSource))
                                     {
@@ -238,9 +261,17 @@ namespace PawsCleaner.Strategies.Stable.Components
                         }
                     }
 
+                    // Read actual folder timestamp after modifications
+                    var postCleanupFolderTime = _host.Storage.GetLastWriteTimeUtc(mapFolder);
+
                     realm.Write(() =>
                     {
                         map.LastCleanTime = DateTimeOffset.UtcNow;
+                        if (deletedThisMap > 0 || bgReplacedForMap)
+                        {
+                            map.LastIndexedTime = postCleanupFolderTime;
+                        }
+
                         map.AppliedFeaturesMask |= currentFeaturesMask;
                         if (bgMode != "keep") map.AppliedFeaturesMask |= 256;
                         map.OptionsHash = currentOptionsHash;
