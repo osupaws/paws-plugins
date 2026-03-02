@@ -1,166 +1,173 @@
-using Paws.Core.Abstractions;
-using Paws.Core.Abstractions.Enums;
-using Paws.Core.Abstractions.Interfaces.Contexts;
 using Paws.Core.Abstractions.Interfaces.Services;
+using Paws.Core.Abstractions.Interfaces.Contexts;
 using Paws.Core.Abstractions.Interfaces;
-using PawsCleaner.Abstractions;
+using Paws.Core.Abstractions.Enums;
 using PawsCleaner.Common;
-using PawsCleaner.Models;
 using Realms;
-using System.Text;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace PawsCleaner.Strategies.Stable.Components
 {
     public class StableIndexer
     {
-        private readonly IHost _host;
+        private readonly Paws.Core.Abstractions.Interfaces.Services.IHost _host;
         private readonly string _name;
 
-        public StableIndexer(IHost host, string strategyName)
+        public StableIndexer(Paws.Core.Abstractions.Interfaces.Services.IHost host, string strategyName)
         {
             _host = host;
             _name = strategyName;
         }
 
-        public void IndexMaps(Realm realm, IStableContext stable, List<dynamic> maps, string songDir)
+        public List<string> IndexFolders(Realm realm, IStableContext stable, List<string> folderNames, string songsDir, Dictionary<string, int> fileRulesetIds)
         {
+            var errors = new List<string>();
             int i = 0;
-            foreach (var map in maps)
+
+            foreach (var folderName in folderNames)
             {
-                string folderPath = Path.Combine(songDir, map.FolderName);
+                string folderPath = Path.Combine(songsDir, folderName);
                 if (!_host.Storage.DirectoryExists(folderPath)) continue;
 
-                var allFiles = _host.Storage.GetFiles(folderPath);
+                // 1. Scan ALL files recursively
+                var allFiles = _host.Storage.GetFiles(folderPath, "*", SearchOption.AllDirectories);
                 var assetsUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
                 void Mark(string f, int m) => MarkUsage(assetsUsage, f, m);
 
+                int contentMask = 0;
+
+                // 2. Heavy Analysis via Core (Detached DTO Pattern)
+                // GetUsedAssets returns a HashSet of relative paths to ALL referenced assets in the folder.
+                var usedAssets = stable.GetUsedAssets(folderPath);
+
+                foreach (var asset in usedAssets)
+                {
+                    string ext = Path.GetExtension(asset).ToLowerInvariant();
+                    int mask = 8; // Default: Storyboard/Asset
+
+                    if (AssetUtils.IsAudio(ext)) mask = 2; // Audio
+                    else if (AssetUtils.IsSkinImage(ext))
+                    {
+                        mask = 1; // Background/Image
+                        contentMask |= 1; // Background
+                    }
+                    else if (AssetUtils.IsVideo(ext))
+                    {
+                        mask = 4; // Video
+                        contentMask |= 1; // Video bit in ContentMask
+                    }
+
+                    Mark(asset, mask);
+                }
+
+                // Mark scripts and detect SB presence
                 foreach (var file in allFiles)
                 {
-                    var ext = Path.GetExtension(file).ToLowerInvariant();
-                    string fname = Path.GetFileName(file);
+                    string ext = Path.GetExtension(file).ToLowerInvariant();
+                    string relPath = Path.GetRelativePath(folderPath, file).Replace('\\', '/');
 
-                    if (ext == ".osu")
+                    if (ext == ".osu" || ext == ".osb")
                     {
-                        try
-                        {
-                            Mark(fname, 16);
-                            var beatmap = stable.ParseBeatmap(file);
-
-                            if (!string.IsNullOrEmpty(beatmap.AudioFilename)) Mark(beatmap.AudioFilename, 2);
-                            if (!string.IsNullOrEmpty(beatmap.BackgroundImage)) Mark(beatmap.BackgroundImage, 1);
-                            if (!string.IsNullOrEmpty(beatmap.Video)) Mark(beatmap.Video, 4);
-
-                            if (beatmap.EventsStoryboard != null)
-                            {
-                                foreach (var sbFile in beatmap.EventsStoryboard.GetAllReferencedFiles())
-                                {
-                                    Mark(sbFile, 8);
-                                }
-                            }
-
-                            foreach (var sample in beatmap.GetHitSoundSamples())
-                            {
-                                Mark(sample, 2);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _host.Logger.LogMessage($"[Index] Failed to parse {fname}: {ex.Message}", PawsLogLvl.Error, _name);
-                        }
-                    }
-                    else if (ext == ".osb")
-                    {
-                        try
-                        {
-                            Mark(fname, 16);
-                            var sb = stable.ParseStoryboard(file);
-                            foreach (var sbFile in sb.GetAllReferencedFiles())
-                            {
-                                Mark(sbFile, 8);
-                            }
-                        }
-                        catch { }
+                        Mark(relPath, 16); // Script mask
+                        if (ext == ".osb") contentMask |= 2; // Storyboard bit
                     }
                 }
 
-                // Calculate ContentMask
-                int contentMask = 0;
-                foreach (var kvp in assetsUsage)
-                {
-                    // If usage has Video (4), add to mask
-                    if ((kvp.Value & 4) != 0) contentMask |= 1; // 1 in FeatureMask = Video
-                    // If usage has SB (8), add to mask
-                    if ((kvp.Value & 8) != 0) contentMask |= 2; // 2 in FeatureMask = SB
-                }
-
-                // Refinining ContentMask logic requires iterating ALL files
+                // 3. Collect Folder Stats for UI
                 bool hasSkinnable = false;
                 bool hasExtraSounds = false;
 
                 foreach (var filePath in allFiles)
                 {
-                    string f = Path.GetFileName(filePath);
-                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    string relPath = Path.GetRelativePath(folderPath, filePath).Replace('\\', '/');
+                    string ext2 = Path.GetExtension(relPath).ToLowerInvariant();
+                    string fnameOnly = Path.GetFileName(relPath);
+
                     bool isUsageAudio = false;
-                    if (assetsUsage.TryGetValue(f, out int u))
+                    if (assetsUsage.TryGetValue(relPath, out int u))
                     {
                         isUsageAudio = (u & 2) != 0;
                     }
 
-                    if (KnownFiles.IsSkinnable(f))
+                    if (KnownFiles.IsSkinnable(fnameOnly))
                     {
                         hasSkinnable = true;
-                        if (AssetUtils.IsAudio(ext) && !isUsageAudio) hasExtraSounds = true;
+                        if (AssetUtils.IsAudio(ext2) && !isUsageAudio) hasExtraSounds = true;
                     }
                 }
 
                 if (hasSkinnable) contentMask |= 4; // Skins
                 if (hasExtraSounds) contentMask |= 8; // Sounds
 
-
+                // 4. Save to Realm
                 realm.Write(() =>
                 {
-                    var existing = realm.Find<IndexedBeatmap>(map.MD5Hash);
-                    if (existing != null) realm.Remove(existing);
+                    var existing = realm.Find<IndexedBeatmap>(folderName);
 
-                    var indexedMap = new IndexedBeatmap
+                    long lastClean = 0;
+                    int appliedFeatures = 0;
+                    string optionsHash = "";
+
+                    if (existing != null)
                     {
-                        Hash = map.MD5Hash,
-                        FolderPath = map.FolderName,
+                        lastClean = existing.LastCleanTime.ToUnixTimeMilliseconds();
+                        appliedFeatures = existing.AppliedFeaturesMask;
+                        optionsHash = existing.OptionsHash;
+                    }
+
+                    var indexedSet = new IndexedBeatmap
+                    {
+                        FolderPath = folderName,
                         LastIndexedTime = DateTimeOffset.UtcNow,
-                        ContentMask = contentMask
+                        LastFolderWriteTime = _host.Storage.GetLastWriteTimeUtc(folderPath),
+                        ContentMask = contentMask,
+                        AppliedFeaturesMask = appliedFeatures,
+                        OptionsHash = optionsHash,
+                        LastCleanTime = DateTimeOffset.FromUnixTimeMilliseconds(lastClean)
                     };
 
                     foreach (var filePath in allFiles)
                     {
-                        string fileName = Path.GetFileName(filePath);
-                        string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                        string relPath = Path.GetRelativePath(folderPath, filePath).Replace('\\', '/');
+                        string fileExt = Path.GetExtension(relPath).ToLowerInvariant();
+                        string fnameOnly = Path.GetFileName(relPath);
 
                         int usage = 0;
-                        if (assetsUsage.TryGetValue(fileName, out var u)) usage = u;
+                        if (assetsUsage.TryGetValue(relPath, out var u)) usage = u;
 
-                        bool isSkinnable = KnownFiles.IsSkinnable(fileName);
+                        bool isSkinnable = KnownFiles.IsSkinnable(fnameOnly);
 
-                        indexedMap.Files.Add(new IndexedFile
+                        int rulesetId = -1;
+                        if (fileRulesetIds.TryGetValue(relPath, out var r)) rulesetId = r;
+
+                        indexedSet.Files.Add(new IndexedFile
                         {
-                            Filename = fileName,
-                            Extension = ext,
+                            Filename = relPath,
+                            Extension = fileExt,
                             UsageType = usage,
-                            IsSkinnable = isSkinnable
+                            IsSkinnable = isSkinnable,
+                            RulesetId = rulesetId
                         });
                     }
-                    realm.Add(indexedMap);
+
+                    realm.Add(indexedSet, update: true);
                 });
 
                 i++;
-                if (i % 50 == 0) _host.Logger.LogMessage($"Indexed {i}/{maps.Count}...", PawsLogLvl.Information, _name);
+                if (i % 50 == 0) _host.Logger.LogMessage($"Indexed {i}/{folderNames.Count} folders...", PawsLogLvl.Information, _name);
             }
+
+            return errors;
         }
 
         private void MarkUsage(Dictionary<string, int> dict, string filename, int mask)
         {
-            string cleanName = filename.Replace("\"", "").Trim();
+            if (string.IsNullOrEmpty(filename)) return;
+            string cleanName = filename.Replace("\"", "").Trim().Replace('\\', '/');
             if (string.IsNullOrEmpty(cleanName)) return;
 
             if (dict.TryGetValue(cleanName, out int currentMask))

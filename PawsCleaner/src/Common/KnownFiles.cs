@@ -36,8 +36,9 @@ public static class KnownFiles
         if (ext == ".wav" || ext == ".mp3" || ext == ".ogg")
         {
             var name = Path.GetFileNameWithoutExtension(filename);
+            var soundBase = name.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
 
-            if (SkinnableSoundNames.Contains(name)) return true;
+            if (SkinnableSoundNames.Contains(soundBase)) return true;
 
             // Special case for comboburst-{n}
             if (name.StartsWith("comboburst-", StringComparison.OrdinalIgnoreCase))

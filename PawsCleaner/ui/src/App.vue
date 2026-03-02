@@ -208,9 +208,17 @@ async function startCleaning() {
     const result = (await Paws.sendCommand("clean", payload)) as any;
     console.log("Cleanup Result:", result);
 
-    if (result?.Message) {
+    const success = result?.Success ?? result?.success;
+    const message = result?.Message ?? result?.message;
+
+    if (success === false) {
+      addLog(message || "Cleanup failed with an unknown error.", "fail");
+      return;
+    }
+
+    if (message) {
       // Backend usually returns a summary like "Cleanup Complete. Processed X sets. Deleted Y maps. (stats)"
-      addLog(result.Message, "good");
+      addLog(message, "good");
     }
 
     addLog("Finalizing assets changes...", "info");
