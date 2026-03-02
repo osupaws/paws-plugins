@@ -15,13 +15,49 @@ namespace PawsCleaner.Strategies.Stable.Components
 {
     public class StableAssetCleaner
     {
-        private readonly IHost _host;
+        private readonly Paws.Core.Abstractions.Interfaces.Services.IHost _host;
         private readonly string _name;
 
-        public StableAssetCleaner(IHost host, string strategyName)
+        public StableAssetCleaner(Paws.Core.Abstractions.Interfaces.Services.IHost host, string strategyName)
         {
             _host = host;
             _name = strategyName;
+        }
+
+        private long GetDirectorySize(string folderPath)
+        {
+            long size = 0;
+            try
+            {
+                var files = _host.Storage.GetFiles(folderPath, "*", SearchOption.AllDirectories);
+                foreach (var f in files)
+                {
+                    try { size += _host.Storage.GetFileLength(f); } catch { }
+                }
+            }
+            catch { }
+            return size;
+        }
+
+        private void CleanEmptySubdirectories(string directory)
+        {
+            try
+            {
+                foreach (var d in _host.Storage.GetDirectories(directory))
+                {
+                    CleanEmptySubdirectories(d);
+                }
+
+                var files = _host.Storage.GetFiles(directory, "*", SearchOption.TopDirectoryOnly);
+                var dirs = _host.Storage.GetDirectories(directory);
+
+                if (files.Length == 0 && dirs.Length == 0)
+                {
+                    _host.Logger.LogMessage($"[AssetCleaner] Removing empty subdirectory: {directory}", PawsLogLvl.Information, _name);
+                    _host.Storage.DeleteDirectory(directory, false);
+                }
+            }
+            catch { }
         }
 
         public static string ComputeOptionsHash(CleanerOptions options, Paws.Core.Abstractions.Interfaces.Services.IStorageService? storage = null)
@@ -138,14 +174,15 @@ namespace PawsCleaner.Strategies.Stable.Components
             }
         }
 
-        public (int deletedFiles, long freedBytes) ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, string? srcJpg, string? srcPng, bool srcCreated)
+        public (int deletedFiles, long freedBytes, List<string> errors) ExecuteAssetCleaning(Realm realm, CleanerOptions options, string songDir, string? srcJpg, string? srcPng, bool srcCreated)
         {
             int deletedFiles = 0;
             long freedBytes = 0;
             var assets = options.Assets;
-            if (assets == null) return (0, 0);
+            if (assets == null) return (0, 0, new List<string>());
 
             string bgMode = assets.BackgroundMode?.ToLowerInvariant() ?? "keep";
+            var errors = new List<string>();
 
             try
             {
@@ -165,12 +202,16 @@ namespace PawsCleaner.Strategies.Stable.Components
                 if (options.Rulesets?.Catch == true) currentFeaturesMask |= 64;
                 if (options.Rulesets?.Mania == true) currentFeaturesMask |= 128;
 
+                int skippedByCache = 0;
+                int mapsProcessed = 0;
+
                 foreach (var map in allIndexed)
                 {
                     if ((currentFeaturesMask & ~map.AppliedFeaturesMask) == 0 && map.LastCleanTime > map.LastIndexedTime)
                     {
                         if (bgMode == "keep" || map.OptionsHash == currentOptionsHash)
                         {
+                            skippedByCache++;
                             continue;
                         }
                     }
@@ -184,12 +225,75 @@ namespace PawsCleaner.Strategies.Stable.Components
                             map.AppliedFeaturesMask |= currentFeaturesMask;
                             map.OptionsHash = currentOptionsHash;
                         });
+                        skippedByCache++;
                         continue;
                     }
 
-                    var mapFolder = Path.Combine(songDir, map.FolderPath);
+                    mapsProcessed++;
+                    var mapFolder = System.IO.Path.Combine(songDir, map.FolderPath);
                     if (!_host.Storage.DirectoryExists(mapFolder)) continue;
 
+                    // --- FOLDER LEVEL DELETION LOGIC ---
+                    var osuFiles = map.Files.Where(f => (f.UsageType & 16) != 0 && f.Extension == ".osu").ToList();
+
+                    bool shouldDeleteWholeFolder = false;
+                    string folderDeleteReason = "";
+
+                    if (osuFiles.Count == 0)
+                    {
+                        shouldDeleteWholeFolder = true;
+                        folderDeleteReason = "Orphaned Folder: No .osu files found.";
+                    }
+                    else if (options.Rulesets != null)
+                    {
+                        bool allTargeted = true;
+                        foreach (var f in osuFiles)
+                        {
+                            bool targeted = false;
+                            switch (f.RulesetId)
+                            {
+                                case 0: targeted = options.Rulesets.Osu; break;
+                                case 1: targeted = options.Rulesets.Taiko; break;
+                                case 2: targeted = options.Rulesets.Catch; break;
+                                case 3: targeted = options.Rulesets.Mania; break;
+                                default: targeted = false; break;
+                            }
+                            if (!targeted)
+                            {
+                                allTargeted = false;
+                                break;
+                            }
+                        }
+
+                        if (allTargeted)
+                        {
+                            shouldDeleteWholeFolder = true;
+                            folderDeleteReason = $"Ruleset Targeting: All difficulties ({osuFiles.Count}) match deletion rules.";
+                        }
+                    }
+
+                    if (shouldDeleteWholeFolder)
+                    {
+                        _host.Logger.LogMessage($"[AssetCleaner] Deleting Folder: {map.FolderPath} | Reason: {folderDeleteReason}", PawsLogLvl.Information, _name);
+                        try
+                        {
+                            // Calculate freed bytes (recursive)
+                            long folderSize = GetDirectorySize(mapFolder);
+                            _host.Storage.DeleteDirectory(mapFolder, true);
+                            freedBytes += folderSize;
+                            deletedFiles += 1; // Count folder as 1? Usually we count files, but here it's cleaner.
+
+                            realm.Write(() => realm.Remove(map));
+                            continue; // Skip file loop
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"Folder delete failed: {mapFolder} - {ex.Message}");
+                            _host.Logger.LogMessage($"Failed to delete folder {mapFolder}: {ex.Message}", PawsLogLvl.Warning, _name);
+                        }
+                    }
+
+                    // --- FILE LEVEL CLEANING ---
                     int deletedThisMap = 0;
                     bool bgReplacedForMap = false;
 
@@ -220,26 +324,40 @@ namespace PawsCleaner.Strategies.Stable.Components
                             }
                         }
 
+                        string reason = "Unknown";
                         if (isNuke)
                         {
                             if (isBg)
                             {
-                                if (bgMode == "keep") { shouldDelete = false; isReplacement = false; }
+                                if (bgMode == "keep") { shouldDelete = false; isReplacement = false; reason = "Nuke: Keep Backgrounds"; }
+                                else { reason = "Nuke: Replacing/Removing BG"; }
                             }
-                            else if (isScript || isAudio) { shouldDelete = false; }
-                            else { shouldDelete = true; }
+                            else if (isScript || isAudio) { shouldDelete = false; reason = "Nuke: Protection (Script/Audio)"; }
+                            else { shouldDelete = true; reason = "Nuke: Generic asset"; }
                         }
                         else if (!isBg)
                         {
-                            if (assets.Storyboards && isSb) shouldDelete = true;
-                            if (assets.Videos && isVideo) shouldDelete = true;
-                            if (assets.Skins && file.IsSkinnable && (AssetUtils.IsSkinImage(file.Extension))) shouldDelete = true;
-                            if (assets.Sounds && file.IsSkinnable && (AssetUtils.IsAudio(file.Extension)) && !isAudio) shouldDelete = true;
+                            if (assets.Storyboards && isSb) { shouldDelete = true; reason = "Option: Storyboards"; }
+                            if (assets.Videos && isVideo) { shouldDelete = true; reason = "Option: Videos"; }
+                            if (assets.Skins && file.IsSkinnable && (AssetUtils.IsSkinImage(file.Extension))) { shouldDelete = true; reason = "Option: Skins (Image)"; }
+                            if (assets.Sounds && file.IsSkinnable && (AssetUtils.IsAudio(file.Extension)) && !isAudio) { shouldDelete = true; reason = "Option: Sounds (Audio)"; }
+
+                            // Specific fix for .osb: It's marked as isScript (16) AND isSb (8). 
+                            // If isSb is true and assets.Storyboards is true, we should delete it even if it's a script.
+                            if (isScript && isSb && assets.Storyboards) { shouldDelete = true; reason = "Option: .osb Script removal"; }
+
+                            if (!shouldDelete) reason = "Protection: In use or not requested";
+                        }
+                        else if (isBg && !shouldDelete) { reason = "BG: Keep mode"; }
+
+                        if (shouldDelete || isReplacement)
+                        {
+                            _host.Logger.LogMessage($"[AssetCleaner][VERBOSE] Folder: {map.FolderPath} | File: {file.Filename} | Action: {(isReplacement ? "Replace" : "Delete")} | Reason: {reason}", PawsLogLvl.Information, _name);
                         }
 
                         if (shouldDelete)
                         {
-                            var fullPath = Path.Combine(mapFolder, file.Filename);
+                            var fullPath = System.IO.Path.Combine(mapFolder, file.Filename).Replace('/', System.IO.Path.DirectorySeparatorChar);
                             if (_host.Storage.FileExists(fullPath))
                             {
                                 try
@@ -248,17 +366,41 @@ namespace PawsCleaner.Strategies.Stable.Components
                                     _host.Storage.DeleteFile(fullPath);
                                     deletedFiles++;
                                     deletedThisMap++;
+                                }
+                                catch (Exception dex)
+                                {
+                                    errors.Add($"Delete failed: {fullPath} - {dex.Message}");
+                                    _host.Logger.LogMessage($"Failed to delete {fullPath}: {dex.Message}", PawsLogLvl.Warning, _name);
+                                }
 
-                                    if (isReplacement && !string.IsNullOrEmpty(replacementSource) && _host.Storage.FileExists(replacementSource))
+                                if (isReplacement && !string.IsNullOrEmpty(replacementSource) && _host.Storage.FileExists(replacementSource))
+                                {
+                                    try
                                     {
-                                        // Use IStableContext for symlinks if available, or just copy as fallback
-                                        try { _host.Stable.GetStableContext().CreateSymlink(replacementSource, fullPath); }
-                                        catch { /* Fallback to manual check if needed, but CreateSymlink is in V3 */ }
+                                        _host.Stable.GetStableContext().CreateSymlink(replacementSource, fullPath);
+                                    }
+                                    catch (Exception sex)
+                                    {
+                                        errors.Add($"Symlink failed: {fullPath} - {sex.Message}");
+                                        _host.Logger.LogMessage($"Failed to link BG for {fullPath}: {sex.Message}", PawsLogLvl.Warning, _name);
                                     }
                                 }
-                                catch { }
+                            }
+                            else
+                            {
+                                errors.Add($"File does not exist: {fullPath}");
                             }
                         }
+                    }
+
+                    // --- SUBDIRECTORY CLEANUP ---
+                    try
+                    {
+                        CleanEmptySubdirectories(mapFolder);
+                    }
+                    catch (Exception ex)
+                    {
+                        _host.Logger.LogMessage($"[AssetCleaner] Subdir cleanup error for {map.FolderPath}: {ex.Message}", PawsLogLvl.Warning, _name);
                     }
 
                     // Read actual folder timestamp after modifications
@@ -276,14 +418,32 @@ namespace PawsCleaner.Strategies.Stable.Components
                         if (bgMode != "keep") map.AppliedFeaturesMask |= 256;
                         map.OptionsHash = currentOptionsHash;
                     });
+
+                    // 4. Folder Deletion Check: if all .osu files were removed
+                    try
+                    {
+                        var remainingFiles = _host.Storage.GetFiles(mapFolder, "*.osu", System.IO.SearchOption.TopDirectoryOnly);
+                        if (remainingFiles.Length == 0)
+                        {
+                            _host.Logger.LogMessage($"[AssetCleaner] No .osu files remaining in {map.FolderPath}. Deleting entire folder.", PawsLogLvl.Information, _name);
+                            _host.Storage.DeleteDirectory(mapFolder, true);
+                        }
+                    }
+                    catch (Exception fex)
+                    {
+                        _host.Logger.LogMessage($"Failed to check/delete folder {mapFolder}: {fex.Message}", PawsLogLvl.Warning, _name);
+                    }
                 }
+
+                _host.Logger.LogMessage($"[AssetCleaner] Processed {mapsProcessed} maps, Skipped {skippedByCache} maps via cache.", PawsLogLvl.Information, _name);
             }
             catch (Exception ex)
             {
                 _host.Logger.LogMessage($"Error in asset cleaning: {ex.Message}", PawsLogLvl.Error, _name);
+                return (0, 0, new List<string> { ex.Message });
             }
 
-            return (deletedFiles, freedBytes);
+            return (deletedFiles, freedBytes, errors);
         }
     }
 }

@@ -5,18 +5,17 @@ namespace PawsCleaner.Strategies.Stable
     public partial class IndexedBeatmap : IRealmObject
     {
         [PrimaryKey]
-        public string Hash { get; set; } = ""; // MD5 from osu!.db
+        public string FolderPath { get; set; } = ""; // Relative to Songs folder
 
-        public string FolderPath { get; set; } = "";
-
-        public DateTimeOffset LastIndexedTime { get; set; } // For detecting folder changes (re-download check)
+        public DateTimeOffset LastIndexedTime { get; set; } // When we last scanned this folder
+        public DateTimeOffset LastFolderWriteTime { get; set; } // LastWriteTime of the folder to detect changes
 
         public DateTimeOffset LastCleanTime { get; set; } // When the cleanup was last performed
 
         public int AppliedFeaturesMask { get; set; } // Bitmask of CleanerFeatures (matching Lazer bitmask)
         public string OptionsHash { get; set; } = ""; // Hash of cleaner options (for BG replacement detection)
 
-        public int ContentMask { get; set; } // Bitmask of what the map ACTUALLY HAS (Videos, SB, etc.)
+        public int ContentMask { get; set; } // Bitmask of what the map folder ACTUALLY HAS (Videos, SB, etc.)
 
         public IList<IndexedFile> Files { get; } = null!;
     }
@@ -38,5 +37,7 @@ namespace PawsCleaner.Strategies.Stable
         // Instead, the GAME engine checks for "cursor.png" automatically.
         // So distinct property: IsSkinnable (true if filename matches standard skin list)
         public bool IsSkinnable { get; set; }
+
+        public int RulesetId { get; set; } = -1; // Only for .osu files (UsageType & 16). 0=osu, 1=taiko, 2=catch, 3=mania
     }
 }

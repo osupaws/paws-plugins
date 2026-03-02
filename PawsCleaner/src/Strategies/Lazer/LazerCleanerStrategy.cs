@@ -35,11 +35,6 @@ namespace PawsCleaner.Strategies.Lazer
         {
             if (_host == null) return new { Success = false, Message = "Host not initialized." };
 
-            if (System.Diagnostics.Process.GetProcessesByName("osu").Length > 0 || System.Diagnostics.Process.GetProcessesByName("osu!").Length > 0)
-            {
-                return new { Success = false, Message = "Cannot clean while osu!lazer is running. Please close the game." };
-            }
-
             return await Task.Run(async () =>
             {
                 var context = _host.Lazer.GetLazerContext();
@@ -143,18 +138,23 @@ namespace PawsCleaner.Strategies.Lazer
                     var protectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     var bgFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    foreach (var set in setsToProcess)
+                    foreach (var setObj in setsToProcess)
                     {
-                        if (set.Files == null || set.Files.Count == 0) continue;
+                        var set = (dynamic)setObj;
+                        var setFiles = (IEnumerable<dynamic>)set.Files;
+                        var setBeatmaps = (IEnumerable<dynamic>)set.Beatmaps;
+
+                        if (setFiles == null || !setFiles.Any()) continue;
 
                         int mapsInSetToDelete = 0;
 
                         try
                         {
                             // A. Ruleset Logic
-                            foreach (var map in set.Beatmaps)
+                            var mapsList = setBeatmaps.ToList();
+                            foreach (var map in mapsList)
                             {
-                                int rid = map.RulesetID;
+                                int rid = (int)map.RulesetID;
                                 // Statistics
                                 switch (rid)
                                 {
@@ -177,7 +177,7 @@ namespace PawsCleaner.Strategies.Lazer
 
                                 if (!keep)
                                 {
-                                    mapsToDelete.Add(map.Id);
+                                    mapsToDelete.Add((string)map.Id.ToString());
                                     mapsDeleted++;
                                     mapsInSetToDelete++;
 
@@ -193,9 +193,9 @@ namespace PawsCleaner.Strategies.Lazer
                             }
 
                             // Check if whole set should be deleted
-                            if (set.Beatmaps.Count > 0 && mapsInSetToDelete == set.Beatmaps.Count)
+                            if (mapsList.Count > 0 && mapsInSetToDelete == mapsList.Count)
                             {
-                                setsToDelete.Add(set.Id);
+                                setsToDelete.Add((string)set.Id.ToString());
                                 continue;
                             }
 
@@ -203,12 +203,13 @@ namespace PawsCleaner.Strategies.Lazer
                             // B.1 Populate protected lists from metadata
                             protectedFiles.Clear();
                             bgFiles.Clear();
-                            foreach (var map in set.Beatmaps)
+                            foreach (var map in mapsList)
                             {
-                                if (map.Metadata == null) continue;
-                                string? audio = map.Metadata?.AudioFile;
+                                var metadata = (dynamic)map.Metadata;
+                                if (metadata == null) continue;
+                                string? audio = (string?)metadata.AudioFile;
                                 if (!string.IsNullOrEmpty(audio)) protectedFiles.Add(audio);
-                                string? bg = map.Metadata?.BackgroundFile;
+                                string? bg = (string?)metadata.BackgroundFile;
                                 if (!string.IsNullOrEmpty(bg))
                                 {
                                     bgFiles.Add(bg);
@@ -229,11 +230,11 @@ namespace PawsCleaner.Strategies.Lazer
 
                         // --- UPDATE CACHE ---
                         // Only if not deleted
-                        if (!setsToDelete.Contains(set.Id))
+                        string currentSetId = set.Id.ToString();
+                        if (!setsToDelete.Contains(currentSetId))
                         {
                             // Retrieve updated hash
-                            string setIdStr = set.Id.ToString();
-                            string? newHash = set.Hash;
+                            string? newHash = (string?)set.Hash;
 
                             if (!string.IsNullOrEmpty(newHash))
                             {
@@ -242,7 +243,7 @@ namespace PawsCleaner.Strategies.Lazer
                                     using var updateRealm = Realm.GetInstance(realmConfig);
                                     updateRealm.Write(() =>
                                     {
-                                        var existing = updateRealm.Find<CachedLazerSet>(setIdStr);
+                                        var existing = updateRealm.Find<CachedLazerSet>(currentSetId);
                                         int mergedMask = currentFeaturesMask;
 
                                         if (existing != null)
@@ -252,7 +253,7 @@ namespace PawsCleaner.Strategies.Lazer
 
                                         updateRealm.Add(new CachedLazerSet
                                         {
-                                            SetId = setIdStr,
+                                            SetId = currentSetId,
                                             SetHash = newHash,
                                             AppliedFeaturesMask = mergedMask,
                                             OptionsHash = currentOptionsHash,
@@ -262,7 +263,7 @@ namespace PawsCleaner.Strategies.Lazer
                                 }
                                 catch (Exception ex)
                                 {
-                                    _host.Logger.LogMessage($"[CACHE] Error updating cache for set {set.Id}: {ex.Message}", PawsLogLvl.Warning, Name);
+                                    _host.Logger.LogMessage($"[CACHE] Error updating cache for set {currentSetId}: {ex.Message}", PawsLogLvl.Warning, Name);
                                 }
                             }
                         }
