@@ -169,6 +169,11 @@ namespace PawsCleaner.Strategies.Stable.Components
             }
             catch (Exception ex)
             {
+                var inner = ex.InnerException ?? ex;
+                if (inner is Paws.Core.Abstractions.Exceptions.StableIsRunningException)
+                {
+                    throw;
+                }
                 _host.Logger.LogMessage($"[BG ERROR] Stable BG Prep failed: {ex.Message}", PawsLogLvl.Error, _name);
                 return (null, null, false);
             }

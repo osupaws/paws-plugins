@@ -202,6 +202,9 @@ namespace PawsCleaner.Strategies.Lazer.Components
                 }
                 catch (Exception ex)
                 {
+                    // Bubble up safety exceptions, log others
+                    var inner = ex.InnerException ?? ex;
+                    if (inner is Paws.Core.Abstractions.Exceptions.LazerIsRunningException) throw;
                     _host.Logger.LogMessage($"[BG ERROR] BG Prep failed: {ex.Message}", PawsLogLvl.Error, _name);
                 }
             }
