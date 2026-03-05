@@ -318,7 +318,7 @@ namespace PawsCleaner.Strategies.Lazer
                 catch (Exception ex)
                 {
                     _host.Logger.LogMessage($"Lazer cleanup error: {ex}", PawsLogLvl.Error, Name);
-                    return new { Success = false, Message = $"Error: {ex.Message}" };
+                    throw; // Delegate UI reporting to PawsCleaner.cs
                 }
             });
         }
